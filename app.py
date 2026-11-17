@@ -110,6 +110,7 @@ else:
     st.markdown("**Windows playback device**")
     if st.button("Refresh audio devices", key="refresh_audio_devices"):
         st.session_state.pop("output_devices", None)
+        st.session_state.pop("last_audio_check", None)
     if "output_devices" not in st.session_state:
         try:
             st.session_state["output_devices"] = list_output_devices()
@@ -132,17 +133,32 @@ else:
             key="selected_output_index",
         )
         st.caption("Only playback outputs are shown—not microphones. Select the speaker or Bluetooth headphones actually playing your song.")
-        if st.button("Test selected device (3 seconds)", key="test_audio_device"):
+        st.caption("Quick sound test checks whether audio reaches Vibe Finder. It does NOT identify the song or confirm a correct music match.")
+        if st.button("Quick sound test (1-second audio sample)", key="test_audio_device"):
             try:
-                with st.spinner("Checking audio signal for 3 seconds…"):
+                with st.spinner("Opening the selected Windows output and collecting 1 second of audio…"):
                     check = test_output_device(selected_index)
-                if check["audible"]:
-                    st.success(f"Sound detected on {check['device']} — peak {check['peak_percent']:.1f}%, RMS {check['rms_dbfs']:.1f} dBFS.")
-                    st.progress(min(1.0, check["peak_percent"] / 100.0), text="Recorded signal peak (3-second sample)")
-                else:
-                    st.warning(f"No sound detected on {check['device']}. Play a song, check Windows Volume Mixer, or select another output and test again.")
+                st.session_state["last_audio_check"] = {"device_index": selected_index, "result": check}
             except CaptureError as exc:
+                st.session_state.pop("last_audio_check", None)
                 st.error(f"Output test failed: {exc}")
+        last_check = st.session_state.get("last_audio_check")
+        if last_check and last_check["device_index"] == selected_index:
+            check = last_check["result"]
+            if check["status"] == "sound_detected":
+                st.success(f"✅ {check['headline']}")
+            elif check["status"] == "no_sound":
+                st.error(f"⛔ {check['headline']}")
+            else:
+                st.warning(f"⚠️ {check['headline']}")
+            st.write(f"**Selected output:** {check['device']}")
+            st.write(check["detail"])
+            st.info(f"**Next:** {check['next_step']}")
+            st.caption(f"Audio recorded: {check['sample_seconds']} second • Audio-check elapsed: {check['elapsed_seconds']:.2f} seconds (includes Windows device startup). The app may take additional time to redraw.")
+            with st.expander("Technical audio details"):
+                st.write(f"Peak: {check['peak_percent']:.2f}% of digital full scale; average (RMS): {check['rms_dbfs']:.1f} dBFS")
+                st.write(f"Device setup: {check['setup_seconds']} s • Recording: {check['capture_seconds']} s")
+                st.caption("These values describe signal level only—not whether the correct music was captured or how well it matches other songs.")
     if st.button("Listen Live: capture 20 seconds of computer output", disabled=not (bool(video_id) and selected_index is not None)):
         try:
             with st.spinner(f"Listening on {by_index[selected_index]['name']} for 20 seconds…"):

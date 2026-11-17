@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import sys
+import time
 import wave
 
 
@@ -71,9 +72,10 @@ def list_output_devices():
     return outputs
 
 
-def _read_samples(seconds, device_index):
-    if not 3 <= seconds <= 30:
-        raise CaptureError("Capture duration must be between 3 and 30 seconds.")
+def _read_samples(seconds, device_index, timings=None):
+    if not 1 <= seconds <= 30:
+        raise CaptureError("Capture duration must be between 1 and 30 seconds.")
+    started = time.perf_counter()
     pa = _load_pyaudio()
     try:
         with pa.PyAudio() as driver:
@@ -98,11 +100,19 @@ def _read_samples(seconds, device_index):
                 input=True, input_device_index=device["index"],
                 frames_per_buffer=2048,
             ) as stream:
+                capture_started = time.perf_counter()
                 frames_left = int(seconds * rate)
                 while frames_left:
                     frames = min(2048, frames_left)
                     chunks.append(stream.read(frames, exception_on_overflow=False))
                     frames_left -= frames
+            capture_ended = time.perf_counter()
+            if timings is not None:
+                timings.update({
+                    "setup_s": round(capture_started - started, 2),
+                    "capture_s": round(capture_ended - capture_started, 2),
+                    "sample_s": float(seconds),
+                })
             return b"".join(chunks), rate, channels, device
     except CaptureError:
         raise
@@ -124,13 +134,47 @@ def _signal_levels(raw):
     return peak, rms_dbfs
 
 
-def test_output_device(device_index: int, seconds: int = 3):
-    """Short nonpersistent signal check; no microphone access."""
-    raw, rate, channels, device = _read_samples(seconds, device_index)
+def describe_signal(peak: float, rms_dbfs: float, clipped_fraction: float = 0.0) -> dict:
+    """Explain a measured output signal; no claim to recognise a song.
+
+    These are diagnostic thresholds, not calibrated music-quality scores.
+    """
+    if peak < 50 / 32768 or rms_dbfs < -60:
+        return {"status": "no_sound", "headline": "No sound detected",
+                "detail": "Vibe Finder did not receive a useful signal from this output.",
+                "next_step": "Play music, confirm its Windows Volume Mixer output, and try another device if needed."}
+    if rms_dbfs < -35:
+        return {"status": "too_quiet", "headline": "Sound detected, but very quiet",
+                "detail": "Audio is reaching Vibe Finder, but the average level is low.",
+                "next_step": "Check the music app's volume and output routing, then test again."}
+    if clipped_fraction > .01 or rms_dbfs > -6:
+        return {"status": "possibly_distorted", "headline": "Sound detected — possibly too loud",
+                "detail": "The sample may be overloaded or distorted.",
+                "next_step": "Lower the playback volume slightly, then test again."}
+    return {"status": "sound_detected", "headline": "Sound detected on this output",
+            "detail": "The digital audio level looks usable for a reference capture.",
+            "next_step": "Play just the intended song, then use Listen Live for the full reference capture."}
+
+
+def test_output_device(device_index: int, seconds: int = 1):
+    """Quick, nonpersistent output signal check; no microphone or song recognition."""
+    started = time.perf_counter()
+    timings = {}
+    raw, rate, channels, device = _read_samples(seconds, device_index, timings=timings)
     peak, dbfs = _signal_levels(raw)
+    # A peak alone can be misleading (a single notification or click counts).
+    # RMS and sample saturation provide context without claiming song quality.
+    import numpy as np
+    samples = np.frombuffer(raw, dtype=np.int16)
+    clipped_fraction = float(np.mean(np.abs(samples.astype(np.int32)) >= 32700)) if samples.size else 0.0
+    diagnosis = describe_signal(peak, dbfs, clipped_fraction)
+    elapsed = time.perf_counter() - started
     return {"device": device["name"], "peak_percent": round(peak * 100, 2),
-            "rms_dbfs": round(dbfs, 1), "audible": peak >= 50 / 32768,
-            "sample_rate": rate, "channels": channels}
+            "rms_dbfs": round(dbfs, 1), "audible": diagnosis["status"] != "no_sound",
+            "sample_rate": rate, "channels": channels,
+            "sample_seconds": seconds, "elapsed_seconds": round(elapsed, 2),
+            "setup_seconds": timings.get("setup_s"),
+            "capture_seconds": timings.get("capture_s"), **diagnosis}
 
 
 def capture_output(seconds: int = 20, *, device_index: int | None = None) -> bytes:

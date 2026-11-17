@@ -108,7 +108,7 @@ class Integration05Tests(unittest.TestCase):
         subprocess.run([sys.executable,str(root/'scripts'/'build_release.py'),
                         '--owner','mikhail-avis','--repo','Vibe-Finder'],check=True,cwd=root,
                        stdout=subprocess.DEVNULL)
-        package=(root/'releases'/'v0.5.0.zip').read_bytes()
+        package=(root/'releases'/'v0.5.1.zip').read_bytes()
         manifest=validate_package(package,'0.4.1')
         self.assertIn('adaptive_discovery.py',manifest['files'])
         self.assertIn('history.py',manifest['files'])
@@ -121,10 +121,10 @@ class Integration05Tests(unittest.TestCase):
             (installed/'user-data').mkdir()
             (installed/'user-data'/'jamendo.json').write_text('{"client_id":"private"}')
             (installed/'update-source.json').write_text('{"manifest_url":"unchanged"}')
-            self.assertEqual(stage_package(installed,package),'0.5.0')
+            self.assertEqual(stage_package(installed,package),'0.5.1')
             self.assertEqual(installed_version(installed),'0.4.1')
-            self.assertEqual(apply_pending(installed),'0.5.0')
-            self.assertEqual(installed_version(installed),'0.5.0')
+            self.assertEqual(apply_pending(installed),'0.5.1')
+            self.assertEqual(installed_version(installed),'0.5.1')
             self.assertEqual((installed/'library'/'my-sound.wav').read_bytes(),b'keep raw music!')
             self.assertEqual((installed/'user-data'/'jamendo.json').read_text(),'{"client_id":"private"}')
             self.assertEqual((installed/'update-source.json').read_text(),'{"manifest_url":"unchanged"}')

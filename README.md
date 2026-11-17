@@ -1,4 +1,4 @@
-# Vibe Finder 0.5.0 — acoustic music discovery (development build)
+# Vibe Finder 0.5.1 — acoustic music discovery (development build)
 
 Vibe Finder analyses real audio to suggest similar-sounding tracks from a sampled set of eligible Jamendo music. Scores are heuristic acoustic similarity indices, not probabilities or proof of shared musical style.
 
@@ -25,7 +25,7 @@ When published on GitHub, install using **App updates > Check for online updates
 1. In Windows, connect your Bluetooth headphones/speaker, USB headset or speakers and start playing music through them.
 2. In Vibe Finder, choose **Paste a YouTube link** as the reference input. Under **Windows playback device**, select **Refresh audio devices** to discover available WASAPI playback outputs.
 3. Under **Listen to audio playing through**, pick the output that Windows is actually sending the music to. The Windows default output is labelled. Bluetooth stereo and Bluetooth hands-free devices may be shown separately; prefer the **stereo playback** output where music is playing.
-4. Click **Test selected device (3 seconds)** while the song is playing. If the test detects a signal, press **Listen Live: capture 20 seconds**. This listens to the selected output only; it doesn't activate a microphone.
+4. Click **Quick sound test (1-second audio sample)** while the song is playing. If the test detects a signal, press **Listen Live: capture 20 seconds**. This listens to the selected output only; it doesn't activate a microphone.
 5. If silent, open **Windows Settings > System > Sound > Volume mixer** and check which output your music app uses. Switch the app's output if needed, reconnect Bluetooth, then **Refresh audio devices** and retry. Devices not available in Windows WASAPI cannot be captured by this method.
 
 The signal test reports peak percentage and RMS dBFS. It checks whether a digital signal was recorded, not whether the music is the intended song. Notifications and other computer sounds sent to the same output can also be included.
@@ -54,10 +54,24 @@ The offline benchmark uses generated WAV tracks, not Jamendo downloads. Run `pyt
 - Jamendo's accessible sample may not include niche tracks or provide good stylistic matches. No candidate is ranked without actual audio analysis, but rankings are not yet calibrated against human similarity judgements.
 - The model does not automatically acquire a YouTube waveform; opt-in live capture is a separate Windows capability.
 - The 0.5 development build has passed local unit tests, including mocked Windows output selection/capture tests, and synthetic-audio benchmarks. Actual Windows output capture and Jamendo end-to-end playback are not verifiable in this Linux environment. A **real Jamendo API and download test**, plus Windows WASAPI capture, still require validation on a Windows machine. The development environment cannot reach Jamendo live.
-- This README describes a development build; the GitHub update feed publishes version 0.5.0 after the archive is uploaded.
+- This README describes a development build; the GitHub update feed publishes version 0.5.1 after the archive is uploaded.
 
 Run tests with `python -m unittest discover -s tests -v`.
 
 ## Updater cache fix in 0.5.0
 
 GitHub Raw can temporarily serve a cached `releases/latest.json` after a new version has been published, causing older Vibe Finder apps to incorrectly report **Up to date**. Version 0.5.0 appends a unique cache-busting query to every manifest fetch and sets no-cache request headers. The updater reports both the installed version and the version supplied by the feed. Version 0.4.1 or earlier may require one manual official update ZIP to acquire this fix; it does not rewrite protected local settings or the launcher.
+
+## Quick audio diagnostics (0.5.1)
+
+The former three-second **Test selected device** now records **one second** of audio.
+Windows WASAPI stream initialization, processing, and Streamlit rerendering add
+wall-clock time. The app now reports how long the audio check itself took,
+including opening the device, and distinguishes this from recording duration.
+
+The output uses **No sound detected**, **Sound detected, but very quiet**,
+**Sound detected on this output**, or **Sound detected — possibly too loud**.
+Those are approximate signal-level diagnostics, *not* song recognition or proof
+that the intended music is captured. Technical readings are behind an expander.
+For a proper reference fingerprint, keep only the intended track playing before
+using the separate 20-second Listen Live capture.
