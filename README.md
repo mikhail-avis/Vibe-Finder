@@ -1,4 +1,4 @@
-# Vibe Finder 0.4 — acoustic music discovery (development build)
+# Vibe Finder 0.4.1 — acoustic music discovery (development build)
 
 Vibe Finder analyses real audio to suggest similar-sounding tracks from a sampled set of eligible Jamendo music. Scores are heuristic acoustic similarity indices, not probabilities or proof of shared musical style.
 
@@ -7,6 +7,16 @@ Vibe Finder analyses real audio to suggest similar-sounding tracks from a sample
 - **Upload audio:** Provide a WAV, FLAC, MP3, OGG or M4A file that you have permission to analyse. The app extracts a temporary audio fingerprint, then searches for eligible Jamendo candidate tracks and ranks them by actual audio features.
 - **Paste a YouTube link:** A YouTube URL identifies a song, but does not provide downloadable audio through the standard YouTube API. On Windows, **Listen Live** can, with your permission and subject to the audio service's terms, capture a 20-second sample of the computer's digital speaker output. It does not use the microphone, but other computer sounds may be present. A URL alone cannot trigger acoustic matching.
 - **Metadata search fallback:** A separate tool finds title/genre-based leads. They are **not** audio comparisons.
+
+## Windows Listen Live: choosing speakers or Bluetooth headphones
+
+1. In Windows, connect your Bluetooth headphones/speaker, USB headset or speakers and start playing music through them.
+2. In Vibe Finder, choose **Paste a YouTube link** as the reference input. Under **Windows playback device**, select **Refresh audio devices** to discover available WASAPI playback outputs.
+3. Under **Listen to audio playing through**, pick the output that Windows is actually sending the music to. The Windows default output is labelled. Bluetooth stereo and Bluetooth hands-free devices may be shown separately; prefer the **stereo playback** output where music is playing.
+4. Click **Test selected device (3 seconds)** while the song is playing. If the test detects a signal, press **Listen Live: capture 20 seconds**. This listens to the selected output only; it doesn't activate a microphone.
+5. If silent, open **Windows Settings > System > Sound > Volume mixer** and check which output your music app uses. Switch the app's output if needed, reconnect Bluetooth, then **Refresh audio devices** and retry. Devices not available in Windows WASAPI cannot be captured by this method.
+
+The signal test reports peak percentage and RMS dBFS. It checks whether a digital signal was recorded, not whether the music is the intended song. Notifications and other computer sounds sent to the same output can also be included.
 
 ## Jamendo catalogue
 
@@ -31,7 +41,7 @@ The offline benchmark uses generated WAV tracks, not Jamendo downloads. Run `pyt
 
 - Jamendo's accessible sample may not include niche tracks or provide good stylistic matches. No candidate is ranked without actual audio analysis, but rankings are not yet calibrated against human similarity judgements.
 - The model does not automatically acquire a YouTube waveform; opt-in live capture is a separate Windows capability.
-- The 0.4 development build has passed local unit tests and synthetic-audio benchmarks, including a mocked Jamendo-to-audio-fingerprint integration test. A **real Jamendo API and download test**, plus Windows WASAPI capture, still require validation on a Windows machine. The development environment cannot reach Jamendo live.
+- The 0.4.1 development build has passed local unit tests, including mocked Windows output selection/capture tests, and synthetic-audio benchmarks. Actual Windows output capture and Jamendo end-to-end playback are not verifiable in this Linux environment. A **real Jamendo API and download test**, plus Windows WASAPI capture, still require validation on a Windows machine. The development environment cannot reach Jamendo live.
 - This README describes a development build; publication as a GitHub online update is a separate step.
 
 Run tests with `python -m unittest discover -s tests -v`.

@@ -14,7 +14,7 @@ from engine import GROUPS, analyse, compare
 from version import APP_VERSION
 from jamendo import JamendoError, find_candidates, valid_client_id, test_connection
 from candidate_pipeline import scan_candidates
-from live_audio import CaptureError, capture_output
+from live_audio import CaptureError, capture_output, list_output_devices, test_output_device
 from updater import UpdateError, check_online, stage_online, stage_package
 
 ROOT = Path(__file__).resolve().parent
@@ -105,10 +105,45 @@ else:
     if video_id:
         st.link_button("Open the song on YouTube", f"https://www.youtube.com/watch?v={video_id}")
     st.info("A YouTube URL alone provides metadata, not the audio waveform. For an acoustic match, play audio you are authorised to capture on this Windows PC, then select Listen Live. The app does not rip YouTube audio.")
-    if st.button("Listen Live: capture 20 seconds of computer output", disabled=not bool(video_id)):
+    st.markdown("**Windows playback device**")
+    if st.button("Refresh audio devices", key="refresh_audio_devices"):
+        st.session_state.pop("output_devices", None)
+    if "output_devices" not in st.session_state:
         try:
-            with st.spinner("Listening to your Windows output for 20 seconds…"):
-                captured = capture_output(20)
+            st.session_state["output_devices"] = list_output_devices()
+            st.session_state.pop("selected_output_index", None)
+        except CaptureError as exc:
+            st.session_state["output_devices"] = []
+            st.warning(str(exc))
+    devices = st.session_state["output_devices"]
+    selected_index = None
+    if devices:
+        by_index = {device["index"]: device for device in devices}
+        indices = list(by_index)
+        if st.session_state.get("selected_output_index") not in by_index:
+            default = next((device for device in devices if device["is_default"]), devices[0])
+            st.session_state["selected_output_index"] = default["index"]
+        selected_index = st.selectbox(
+            "Listen to audio playing through",
+            indices,
+            format_func=lambda idx: f"{by_index[idx]['name']}{' — Windows default' if by_index[idx]['is_default'] else ''}",
+            key="selected_output_index",
+        )
+        st.caption("Only playback outputs are shown—not microphones. Select the speaker or Bluetooth headphones actually playing your song.")
+        if st.button("Test selected device (3 seconds)", key="test_audio_device"):
+            try:
+                with st.spinner("Checking audio signal for 3 seconds…"):
+                    check = test_output_device(selected_index)
+                if check["audible"]:
+                    st.success(f"Sound detected on {check['device']} — peak {check['peak_percent']:.1f}%, RMS {check['rms_dbfs']:.1f} dBFS.")
+                else:
+                    st.warning(f"No sound detected on {check['device']}. Play a song, check Windows Volume Mixer, or select another output and test again.")
+            except CaptureError as exc:
+                st.error(f"Output test failed: {exc}")
+    if st.button("Listen Live: capture 20 seconds of computer output", disabled=not (bool(video_id) and selected_index is not None)):
+        try:
+            with st.spinner(f"Listening on {by_index[selected_index]['name']} for 20 seconds…"):
+                captured = capture_output(20, device_index=selected_index)
                 with tempfile.TemporaryDirectory() as td:
                     wav_path = Path(td) / "reference.wav"
                     wav_path.write_bytes(captured)
