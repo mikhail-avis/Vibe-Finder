@@ -4,6 +4,9 @@ from __future__ import annotations
 import tempfile
 import json
 import os
+import socket
+import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -18,7 +21,8 @@ from catalogues import SOURCES, discover_across_sources
 from adaptive_discovery import search_budgets, focus_styles
 from history import read_history, save_search
 from live_audio import CaptureError, capture_output, list_output_devices, test_output_device
-from updater import UpdateError, check_online, stage_online, stage_package
+from updater import (UpdateError, check_online, stage_online, stage_package, rollback_status, stage_rollback,
+                     experimental_version, stage_experimental, experimental_rollback_status, stage_experimental_rollback)
 
 ROOT = Path(__file__).resolve().parent
 
@@ -58,6 +62,83 @@ with st.sidebar.expander(f"App updates (v{APP_VERSION})", expanded=False):
             except Exception as exc:
                 st.error(f"Download or verification failed: {exc}")
     st.caption("Only apply ZIP files from a source you trust. The existing launcher is kept in place.")
+    previous = rollback_status(ROOT)
+    if previous:
+        st.divider()
+        st.write(f"**Stable rollback available:** v{previous['installed']} → v{previous['restore']}")
+        st.caption("Restores the application files from the last successful update. Your music and settings remain untouched.")
+        if st.button("Prepare rollback to previous stable version", key="stage_stable_rollback"):
+            try:
+                restored = stage_rollback(ROOT)
+                st.warning(f"Rollback to v{restored} is ready. Close Vibe Finder and restart with run-windows.bat to apply.")
+            except (UpdateError, OSError) as exc:
+                st.error(f"Could not prepare rollback: {exc}")
+    elif (ROOT / "updates" / "pending_rollback.json").exists():
+        st.warning("Stable rollback is pending. Restart with run-windows.bat.")
+    else:
+        st.caption("No verified stable rollback is available yet. A backup is created automatically when you next update.")
+
+with st.sidebar.expander("Experimental builds (separate installation)", expanded=False):
+    installed_exp = experimental_version(ROOT)
+    st.write("Experimental builds are installed in **experimental-build**, never over the stable Vibe Finder.")
+    st.caption(f"Installed experimental version: {'none' if installed_exp == '0.0' else 'v' + installed_exp}")
+    st.warning("Preview only: CLAP/Essentia model weights and optional dependencies are not bundled. Stable search remains unchanged.")
+    if (ROOT / "updates" / "pending_experimental.zip").exists():
+        st.info("Experimental build staged. Close Vibe Finder and restart with run-windows.bat to install separately.")
+    if st.button("Check experimental releases", key="check_experimental"):
+        try:
+            trial = check_online(ROOT, channel="experimental")
+            st.session_state["experimental_update"] = trial
+            if trial is None:
+                st.info("No verified experimental release published yet.")
+            elif trial["current"]:
+                st.success(f"Experimental installation is up to date at v{trial['version']}.")
+        except (UpdateError, OSError, ValueError) as exc:
+            st.error(f"Cannot check experimental releases: {exc}")
+    trial = st.session_state.get("experimental_update")
+    if trial and not trial.get("current"):
+        st.write(f"Experimental release available: **v{trial['version']}**")
+        if st.button("Download and prepare experimental build", key="download_experimental"):
+            try:
+                version = stage_online(ROOT, trial, channel="experimental")
+                st.success(f"Experimental v{version} staged separately. Restart with run-windows.bat to install.")
+            except (UpdateError, OSError, ValueError) as exc:
+                st.error(f"Experimental download failed: {exc}")
+    experiment_zip = st.file_uploader("Or choose a trusted experimental Vibe Finder ZIP", type=["zip"], key="experimental_upload")
+    if experiment_zip is not None and st.button("Prepare experimental ZIP", key="manual_experimental"):
+        try:
+            version = stage_experimental(ROOT, experiment_zip.getvalue())
+            st.success(f"Experimental v{version} staged. Restart with run-windows.bat.")
+        except (UpdateError, OSError, ValueError) as exc:
+            st.error(f"Experimental ZIP rejected: {exc}")
+    entrypoint = ROOT / "experimental-build" / "experimental_landing.py"
+    if entrypoint.is_file():
+        st.write("**Experimental preview:** runs on a separate local Streamlit port (8502).")
+        if st.button("Start experimental preview", key="start_experimental"):
+            try:
+                with socket.socket() as sock:
+                    in_use = sock.connect_ex(("127.0.0.1", 8502)) == 0
+                if in_use:
+                    st.info("Port 8502 is already in use. Close that application before starting another preview.")
+                else:
+                    subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(entrypoint),
+                                      "--server.port", "8502", "--server.address", "127.0.0.1",
+                                      "--browser.gatherUsageStats", "false"],
+                                     cwd=str(entrypoint.parent), stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                    st.success("Experimental preview starting. Open http://localhost:8502 in a few seconds.")
+            except (OSError, ValueError) as exc:
+                st.error(f"Could not start experimental preview: {exc}")
+        st.link_button("Open experimental preview", "http://localhost:8502")
+    exp_previous = experimental_rollback_status(ROOT)
+    if exp_previous:
+        st.caption(f"Previous experimental build available: v{exp_previous}")
+        if st.button("Restore previous experimental build", key="rollback_experimental"):
+            try:
+                stage_experimental_rollback(ROOT)
+                st.warning("Experimental rollback staged. Close both experimental and stable apps, then restart Vibe Finder.")
+            except (UpdateError, OSError) as exc:
+                st.error(f"Could not stage experimental rollback: {exc}")
 
 
 SETTINGS_FILE = ROOT / "user-data" / "jamendo.json"

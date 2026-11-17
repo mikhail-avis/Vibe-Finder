@@ -1,0 +1,13 @@
+{
+  "queries": [
+    {
+      "id": "reference-song-01",
+      "reference": "audio/reference_song.wav",
+      "candidates": [
+        {"id": "candidate-01", "path": "audio/song_a.wav", "relevance": 3},
+        {"id": "candidate-02", "path": "audio/song_b.wav", "relevance": 0},
+        {"id": "candidate-03", "path": "audio/song_c.wav", "relevance": 2}
+      ]
+    }
+  ]
+}

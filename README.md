@@ -94,3 +94,13 @@ Those are approximate signal-level diagnostics, *not* song recognition or proof
 that the intended music is captured. Technical readings are behind an expander.
 For a proper reference fingerprint, keep only the intended track playing before
 using the separate 20-second Listen Live capture.
+
+## Stable rollback and experimental preview (introduced in v0.6.1)
+
+**Stable updates** retain a verified local rollback snapshot of the last upgraded source files. In the sidebar's **App updates** section, click **Prepare rollback to previous stable version**, then close the app and restart with `run-windows.bat`. Music folders, settings, and the launcher are excluded from automatic replacement. The rollback covers application files only: it is *not* a full operating-system restore, and it is deliberately blocked if installed files have been manually edited since the update.
+
+**Experimental builds** use a separate opt-in feed at `releases/experimental/latest.json`. Expand **Experimental builds (separate installation)**, check for experimental releases, and prepare the download. Close the app and restart using the normal stable launcher. The experiment is extracted under `experimental-build/` without changing stable source code. Click **Start experimental preview** to launch it on `http://localhost:8502` (stable remains on `8501`). Experimental builds do not automatically install AI model packages or weights. The first experimental build offers a real-audio comparison preview and benchmark code; pretrained CLAP/Essentia inference still requires verified weights and suitable optional dependencies.
+
+If a later experimental build fails, use **Restore previous experimental build**. The stable launcher is preserved and continues to work even if experimental installation fails. **Experimental rollback only becomes available after at least one experimental upgrade**, not immediately after installing the first experiment. Avoid running an experimental preview during an experimental update/rollback because Windows can lock in-use files.
+
+The stable and experimental ZIP channels are mutually exclusive. `scripts/build_experimental_release.py` produces the experimental package and manifest; publish its ZIP before activating its `latest.json`. Never publish the optional experimental feed under the stable `releases/latest.json`.
