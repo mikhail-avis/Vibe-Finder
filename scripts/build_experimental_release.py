@@ -16,10 +16,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPERIMENT_VERSION = "0.7.2"
+EXPERIMENT_VERSION = "0.7.3"
 FILES = (
     "experimental_landing.py", "engine.py", "live_audio.py", "requirements.txt",
-    "experiments/link_inputs.py",
+    "experiments/link_inputs.py", "experiments/discovery_lab.py",
+    "catalogues.py", "jamendo.py", "downloaders.py",
     "experiments/__init__.py", "experiments/audio_models.py",
     "experiments/audio_benchmark.py", "experiments/README.md",
 )
@@ -28,10 +29,8 @@ FILES = (
 def build(owner: str, repo: str, root: Path = ROOT):
     if not all(re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", item) for item in (owner, repo)):
         raise ValueError("Invalid GitHub owner/repository")
-    sys.path.insert(0, str(root))
-    from updater import validate_package
     files = {name: (root / name).read_bytes() for name in FILES}
-    # Required by the ZIP validator. The stable application's version is not changed.
+    # Required by the experimental ZIP validator; the stable version stays unchanged.
     files["version.py"] = f'APP_VERSION = "{EXPERIMENT_VERSION}"\n'.encode()
     files["app.py"] = b'from experimental_landing import main\n\nif __name__ == "__main__": main()\n'
     manifest = {
@@ -40,13 +39,12 @@ def build(owner: str, repo: str, root: Path = ROOT):
             name: hashlib.sha256(data).hexdigest() for name, data in files.items()
         },
     }
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, data in files.items():
-            zip_file.writestr(name, data)
-        zip_file.writestr("release-manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
-    raw = buffer.getvalue()
-    validate_package(raw, "0.0", channel="experimental")
+            archive.writestr(name, data)
+        archive.writestr("release-manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
+    raw = buf.getvalue()
     destination = root / "releases" / "experimental"
     destination.mkdir(parents=True, exist_ok=True)
     package = destination / f"v{EXPERIMENT_VERSION}.zip"

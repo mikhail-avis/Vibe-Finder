@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import tempfile
+import hashlib
 from pathlib import Path
 
 from experiments.audio_models import BackendUnavailable, CLAP, DSP, Essentia
+from experiments.discovery_lab import find_similar_audio
+from catalogues import SOURCES
 from experiments.link_inputs import (
     CAPTURE_DURATIONS, capture_is_current, capture_link_audio, inspect_music_link,
 )
@@ -139,54 +142,104 @@ def _song_input(st, slot: str, title: str, device_index: int | None, duration: i
 
 def main():
     import streamlit as st
-    st.set_page_config(page_title="Vibe Finder • Experimental audio lab", page_icon="🧪", layout="wide")
-    st.title("🧪 Vibe Finder — Experimental audio lab")
-    st.warning("Preview only, separate from stable Vibe Finder (port 8502). CLAP/Essentia weights are not included. DSP runs with current dependencies.")
-    st.write("Compare **actual audio recordings**. For either song, upload a file or paste a music link and capture its playback on Windows.")
-    st.info("YouTube, YouTube Music, SoundCloud, Spotify, Bandcamp, Jamendo and other public HTTPS music links are supported as playback references. Links do NOT provide a waveform: play them through your browser and explicitly capture the output. The app does not rip or download streaming services.")
-    selected = st.selectbox("Acoustic matching backend", ["DSP (stable algorithm)", "CLAP (experimental)", "Essentia (experimental)"])
+    st.set_page_config(page_title="Vibe Finder • Experimental music discovery", page_icon="🧪", layout="wide")
+    st.title("🧪 Vibe Finder — Experimental music discovery")
+    st.caption("One reference song → real waveform analysis → multiple licensed music catalogues → ranked similar-sounding songs")
+    st.warning("Experimental preview on port 8502. AI checkpoints are optional and not included; the DSP matcher works immediately. Stable Vibe Finder remains separate.")
+    activity = st.radio("What would you like to do?", ["Find similar music", "Advanced: Compare two songs"], horizontal=True)
+    selected = st.selectbox("Acoustic matching engine", ["DSP (stable algorithm)", "CLAP (experimental)", "Essentia (experimental)"])
     model_path = ""
     if selected != "DSP (stable algorithm)":
-        st.info("Supply a verified local checkpoint and optional dependencies. CLAP may require extra dependencies, and Essentia is better suited to Linux/WSL. Never load untrusted model files.")
-        model_path = st.text_input("Full local checkpoint path", placeholder="Path to a model you installed and verified")
+        st.info("Supply a trusted local model checkpoint; this is optional and the AI models are not automatically downloaded. Essentia generally needs Linux/WSL.")
+        model_path = st.text_input("Verified local model checkpoint path", placeholder="C:/path/to/your/verified/model")
+    st.info("For YouTube, YouTube Music, SoundCloud, Spotify or other public music links, play the track in your browser and explicitly capture audio from your selected Windows playback output. A link alone doesn't provide audio.")
     needs_output = (st.session_state.get("lab_reference_mode") == "Music link" or
-                    st.session_state.get("lab_candidate_mode") == "Music link")
-    device_index = None
+                    (activity.startswith("Advanced") and st.session_state.get("lab_candidate_mode") == "Music link"))
+    device_index = _capture_device_panel(st) if needs_output else None
     duration = 20
     if needs_output:
-        device_index = _capture_device_panel(st)
-        duration = st.select_slider("Recording duration for each link", options=list(CAPTURE_DURATIONS), value=20,
-                                    key="lab_capture_duration")
-        st.caption("A 20-second sample typically gives the matching engine more musical context than a one-second sound check.")
-    left, right = st.columns(2)
-    with left:
+        duration = st.select_slider("Recording duration", options=list(CAPTURE_DURATIONS), value=20, key="lab_capture_duration")
+    if activity == "Find similar music":
+        st.subheader("1. Give Vibe Finder one song")
         ref_mode, reference, ref_capture = _song_input(st, "reference", "Reference song", device_index, duration)
-    with right:
-        cand_mode, candidate, cand_capture = _song_input(st, "candidate", "Comparison song", device_index, duration)
-    ready_ref = reference is not None if ref_mode == "Upload audio" else ref_capture is not None
-    ready_cand = candidate is not None if cand_mode == "Upload audio" else cand_capture is not None
-    if st.button("Analyse and compare actual audio", type="primary", disabled=not ready_ref or not ready_cand):
-        try:
-            backend = backend_for(selected, model_path)
-            with tempfile.TemporaryDirectory(prefix="vf-experiment-") as temp:
-                folder = Path(temp)
-                ref_path = store_input(ref_mode, reference, ref_capture, folder, "reference")
-                candidate_path = store_input(cand_mode, candidate, cand_capture, folder, "comparison")
-                with st.spinner("Extracting acoustic features from both recordings (up to 30 seconds each)..."):
-                    ref_features = backend.extract(ref_path)
-                    other_features = backend.extract(candidate_path)
-                    score = float(backend.similarity(ref_features, other_features))
-            if backend.name == "dsp":
-                st.metric("Heuristic DSP similarity", f"{score:.1f}/100")
-                st.caption("This score is an uncalibrated acoustic heuristic, not a probability or listening judgment.")
-            else:
-                st.metric(f"{backend.name.upper()} cosine similarity", f"{score:+.4f}")
-                st.caption("Cosine similarity ranges from -1 to +1; it is not a calibrated match percentage.")
-            st.success("Comparison completed using recorded audio waveforms. Temporary analysis files have been deleted.")
-        except (BackendUnavailable, ValueError, OSError, RuntimeError, ImportError) as exc:
-            st.error(f"Comparison unavailable: {exc}")
+        ready_ref = reference is not None if ref_mode == "Upload audio" else ref_capture is not None
+        st.subheader("2. Choose where to search")
+        chosen_sources = st.multiselect("Music catalogues", list(SOURCES), default=list(SOURCES),
+                                        help="Each candidate must have downloadable, licence-eligible audio to be scored.")
+        sample_count = st.slider("Candidate recordings to analyse", min_value=4, max_value=24, value=12, step=4)
+        st.caption("This compares a sampled selection of actual recordings. It does not search every song on every platform, and streaming-site links are not candidate catalogues.")
+        # A prior search must never be presented as results for a changed song.
+        raw_reference = (reference.getvalue() if ref_mode == "Upload audio" and reference is not None
+                         else (ref_capture or {}).get("wav", b""))
+        identity = (hashlib.sha256(raw_reference).hexdigest() if raw_reference else "",
+                    selected, model_path, tuple(chosen_sources), sample_count)
+        if st.button("Find similar-sounding songs", type="primary", disabled=not ready_ref or not chosen_sources):
+            try:
+                matcher = backend_for(selected, model_path)
+                with tempfile.TemporaryDirectory(prefix="vf-discovery-ref-") as td:
+                    reference_path = store_input(ref_mode, reference, ref_capture, Path(td), "reference")
+                    bar = st.progress(0, text="Finding usable candidate audio...")
+                    def update(done, total, matches):
+                        bar.progress(done / max(1, total), text=f"Audio analysed: {done}/{total} • {matches} usable matches")
+                    with st.spinner("Discovering catalogue recordings and comparing their real audio..."):
+                        result = find_similar_audio(reference_path, matcher, sources=tuple(chosen_sources),
+                                                    sample_count=sample_count, on_progress=update)
+                    bar.empty()
+                st.session_state["lab_discovery_result"] = result
+                st.session_state["lab_discovery_identity"] = identity
+            except (BackendUnavailable, ValueError, OSError, RuntimeError, ImportError) as exc:
+                st.error(f"Music discovery couldn't finish: {exc}")
+        result = (st.session_state.get("lab_discovery_result")
+                  if st.session_state.get("lab_discovery_identity") == identity else None)
+        if result:
+            st.subheader("3. Similar-sounding music")
+            st.write(f"Compared real audio from **{result['analysed']} of {result['sampled']}** sampled tracks across {', '.join(result['sources'])}.")
+            if not result["ranked"]:
+                st.warning("No candidate recordings could be decoded and compared; this does not mean there are no similar songs.")
+            for i, song in enumerate(result["ranked"], 1):
+                with st.container(border=True):
+                    st.markdown(f"**{i}. {song['artist']} — {song['title']}**")
+                    st.caption(f"{song['source']} • actual acoustic analysis")
+                    if result['backend'] == 'dsp':
+                        st.write(f"DSP heuristic similarity: **{song['score']:.1f}/100**")
+                    else:
+                        st.write(f"{result['backend'].upper()} cosine similarity: **{song['score']:+.4f}**")
+                    if song['listen_url'].startswith('https://'):
+                        st.link_button("Listen to track", song['listen_url'])
+                    if song['license_url'].startswith('https://'):
+                        st.link_button("Licence details", song['license_url'])
+            if result['warnings'] or result['skipped']:
+                with st.expander("Catalogue warnings and tracks that couldn't be analysed"):
+                    st.write("\n".join((result['warnings'] + result['skipped'])[:30]))
+            st.caption("Rankings are not calibrated probabilities. Candidate discovery is a bounded sample, not an exhaustive music search. No scores come from track names or metadata.")
+    else:
+        st.subheader("Developer-only comparison — two known recordings")
+        st.caption("Use this to test whether a new AI model recognizes the similarity of two tracks. It is not required for normal discovery.")
+        left, right = st.columns(2)
+        with left:
+            ref_mode, reference, ref_capture = _song_input(st, "reference", "Reference song", device_index, duration)
+        with right:
+            cand_mode, candidate, cand_capture = _song_input(st, "candidate", "Comparison song", device_index, duration)
+        ready_ref = reference is not None if ref_mode == "Upload audio" else ref_capture is not None
+        ready_cand = candidate is not None if cand_mode == "Upload audio" else cand_capture is not None
+        if st.button("Analyse and compare actual audio", type="primary", disabled=not ready_ref or not ready_cand):
+            try:
+                backend = backend_for(selected, model_path)
+                with tempfile.TemporaryDirectory(prefix="vf-experiment-") as td:
+                    folder = Path(td)
+                    ref_path = store_input(ref_mode, reference, ref_capture, folder, "reference")
+                    candidate_path = store_input(cand_mode, candidate, cand_capture, folder, "comparison")
+                    with st.spinner("Extracting features from both recordings..."):
+                        score = float(backend.similarity(backend.extract(ref_path), backend.extract(candidate_path)))
+                if backend.name == "dsp":
+                    st.metric("Heuristic DSP similarity", f"{score:.1f}/100")
+                else:
+                    st.metric(f"{backend.name.upper()} cosine similarity", f"{score:+.4f}")
+                st.caption("Uncalibrated acoustic similarity, not a probability. No temporary analysis audio retained.")
+            except (BackendUnavailable, ValueError, OSError, RuntimeError, ImportError) as exc:
+                st.error(f"Comparison unavailable: {exc}")
     st.divider()
-    st.caption("Only capture audio you are permitted to analyse. The app doesn't fetch audio from YouTube, Spotify or other streaming services. Recorded playback stays in this browser session until discarded or the session ends; temporary analysis files are deleted. Stable Vibe Finder remains unchanged.")
+    st.caption("Only analyse audio you have permission to use. Link capture requires explicit Windows output recording and does not scrape or download streaming-service audio.")
 
 
 if __name__ == "__main__":

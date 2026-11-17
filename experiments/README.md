@@ -137,3 +137,21 @@ still rejected. Query strings are preserved, including YouTube playlist IDs.
 Pasting a link is *not* an audio download. The user must still play permitted
 audio in the browser and choose an output for explicit Windows loopback capture.
 Reference and comparison captures are compared from their real WAV samples.
+
+## Experimental 0.7.3: automatic song discovery
+
+The default experimental interface accepts **one reference song**, either an
+allowed upload or user-initiated Windows output capture from a music link. It
+retrieves eligible downloadable recordings from Jamendo, ccMixter and Wikimedia
+Commons, decodes their real audio waveforms and ranks them against the reference.
+
+The manual two-song similarity test remains accessible under **Advanced: Compare
+two songs** for model diagnostics. The audio lab has no automatic streaming-site
+download, no exhaustive Spotify/YouTube catalogue search, and no automatic model
+weights download. CLAP or Essentia can rank discovered candidate recordings only
+when their optional trusted model checkpoint and dependencies are installed.
+
+Limited catalogue search may yield no good matches. Any reported similarity is a
+heuristic DSP score or raw cosine measure, **not** a calibrated match likelihood.
+Catalogue recordings are downloaded temporarily and discarded following feature
+extraction. Only user-permitted audio should be captured.
