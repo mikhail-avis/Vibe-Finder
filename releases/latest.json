@@ -1,6 +1,6 @@
 {
   "app_id": "vibe-finder",
-  "version": "0.6.0",
-  "archive_url": "https://raw.githubusercontent.com/mikhail-avis/Vibe-Finder/main/releases/v0.6.0.zip",
-  "sha256": "a4010e1d4924624f6186fd8046fce4d1ee8d718beaba8e4b34142ed62e9fdc66"
+  "version": "0.6.1",
+  "archive_url": "https://raw.githubusercontent.com/mikhail-avis/Vibe-Finder/main/releases/v0.6.1.zip",
+  "sha256": "fdd44eba529d0f6ac619d964418d4b55827524bf83924cdcfdd5a63987398d7c"
 }
