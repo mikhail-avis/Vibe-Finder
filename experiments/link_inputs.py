@@ -7,6 +7,7 @@ playback output using WASAPI loopback. Only the WAV bytes are compared.
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from urllib.parse import urlsplit, urlunsplit
 
@@ -26,12 +27,22 @@ def inspect_music_link(value: str) -> dict:
     if not isinstance(value, str) or len(value) > MAX_LINK_CHARS:
         raise ValueError("Paste a music-page URL of at most 2,048 characters.")
     url = value.strip()
+    if not url or any(ch.isspace() or ord(ch) < 32 for ch in url) or "\\" in url:
+        raise ValueError("Enter a public music website link without spaces or backslashes.")
+    # Most browsers accept a pasted domain without https://. Make that convenience
+    # explicit, but never reinterpret an existing scheme (http, file, javascript,
+    # etc.) or protocol-relative URLs. Opening the result remains user-initiated;
+    # the application still NEVER downloads or extracts music from the link.
+    added_https = False
+    if "://" not in url and not url.startswith("//") and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", url):
+        url = "https://" + url
+        added_https = True
     try:
         bits = urlsplit(url)
         host = (bits.hostname or "").lower().rstrip(".")
         port = bits.port
     except ValueError as exc:
-        raise ValueError("Enter a valid HTTPS music link.") from exc
+        raise ValueError("Enter a valid public HTTPS music link.") from exc
     if (bits.scheme.lower() != "https" or not host or bits.username is not None
             or bits.password is not None or port not in (None, 443)
             or any(ch.isspace() or ord(ch) < 32 for ch in url)):
@@ -67,7 +78,7 @@ def inspect_music_link(value: str) -> dict:
     else:
         provider = "Music website"
     canonical = urlunsplit(("https", bits.netloc.lower(), bits.path or "/", bits.query, bits.fragment))
-    return {"url": canonical, "provider": provider}
+    return {"url": canonical, "provider": provider, "added_https": added_https}
 
 
 def capture_link_audio(link: str, device_index: int | None, seconds: int = 20, *, recorder=None) -> dict:

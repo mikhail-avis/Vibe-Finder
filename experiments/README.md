@@ -124,3 +124,16 @@ This is a Windows-only capture path, not an automatic YouTube-to-waveform API.
 
 CLAP and Essentia model weights remain separate optional dependencies. DSP works
 with the standard installation and provides the baseline acoustic score.
+
+## Experimental v0.7.2 — normalizing browser-pasted music links
+
+Links such as `www.youtube.com/watch?v=...`, `youtube.com/watch?v=...`,
+`youtu.be/...`, `soundcloud.com/...` or `open.spotify.com/track/...` are
+accepted without an `https://` prefix. The application adds `https://` and
+shows a confirmation. Existing HTTPS links are unchanged; insecure schemes,
+local addresses, IP literals, embedded credentials and malformed links are
+still rejected. Query strings are preserved, including YouTube playlist IDs.
+
+Pasting a link is *not* an audio download. The user must still play permitted
+audio in the browser and choose an output for explicit Windows loopback capture.
+Reference and comparison captures are compared from their real WAV samples.

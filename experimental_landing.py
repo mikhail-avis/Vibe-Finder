@@ -110,6 +110,8 @@ def _song_input(st, slot: str, title: str, device_index: int | None, duration: i
     if url.strip():
         try:
             valid = inspect_music_link(url)
+            if valid["added_https"]:
+                st.info("Added https:// automatically. Your music link is ready.")
             st.caption(f"Detected: {valid['provider']}. Open the link, play the song, then capture the sound from Windows.")
             st.link_button(f"Open {valid['provider']} song in browser", valid["url"])
         except ValueError as exc:
