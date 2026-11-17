@@ -16,9 +16,10 @@ from pathlib import Path
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPERIMENT_VERSION = "0.7.0"
+EXPERIMENT_VERSION = "0.7.1"
 FILES = (
-    "experimental_landing.py", "engine.py", "requirements.txt",
+    "experimental_landing.py", "engine.py", "live_audio.py", "requirements.txt",
+    "experiments/link_inputs.py",
     "experiments/__init__.py", "experiments/audio_models.py",
     "experiments/audio_benchmark.py", "experiments/README.md",
 )

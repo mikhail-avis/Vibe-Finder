@@ -1,39 +1,27 @@
-# Vibe Finder — experiment/audio-embeddings-benchmark
+# Experimental Audio Lab v0.7.1 — Music Link Capture
 
-## Goal
+- Separate opt-in experimental installer, stable app remains v0.6.1.
+- Reference and comparison independently accept uploaded WAV/MP3/FLAC/OGG/M4A
+  or a public HTTPS music-page link.
+- YouTube / YouTube Music / SoundCloud / Spotify / Bandcamp / Jamendo / Wikimedia
+  and generic HTTPS music pages open in browser. No audio download or ripping.
+- User explicitly captures 10, 20 or 30 seconds from a selected Windows WASAPI
+  playback output (including supported Bluetooth); no microphone.
+- One-second audio-level check and recorded-WAV playback preview.
+- Both recordings flow to the real DSP/optional CLAP/Essentia analyser.
+- In-memory session captures and short-lived temporary analysis WAVs.
+- Experimental v0.7.1 update validates and can roll back to v0.7.0.
+- Automated tests include URL safety, selected-output capture, decoded audio
+  into the DSP analyser, channel isolation and rollback.
 
-An independent measurable audio similarity bake-off: current production DSP,
-LAION CLAP music checkpoint, Essentia Discogs track embeddings. This branch
-is **not a published application update**; live Vibe Finder remains v0.6.0.
+## Unverified
 
-## Completed
+- Real Windows Bluetooth/speaker capture needs on-device confirmation.
+- No live streaming-service integration, YouTube audio download or inference
+  from a music link alone. Playback capture requires permission under site terms.
+- No optional CLAP/Essentia pretrained weights bundled or run.
 
-- New opt-in model adapters: `experiments/audio_models.py` (DSP, CLAP, Essentia).
-- CLAP consumes actual 48 kHz 10-second mono audio windows; normalises/averages
-  patch embeddings. The music checkpoint must be provided locally.
-- Essentia consumes actual 16 kHz mono audio and pools Discogs track embeddings;
-  requires TensorFlow Essentia in a supported environment and a local graph.
-- Reproducible evaluation CLI: `python -m experiments.audio_benchmark`.
-- Explicit human relevance ratings 0..3, held identical across backends.
-- NDCG@K, precision@K, per-query rankings, timings, cache reuse/invalidation.
-- Clear `unavailable` status instead of pretending optional models ran.
-- 57 automated offline tests pass (44 prior + 13 new).
+## Next
 
-## Not completed — must not claim
-
-- No real pretrained CLAP or Essentia weights installed or inferred here.
-- No comparisons against a human-rated corpus of real songs yet.
-- No evidence yet that any AI embedding beats DSP at finding similar music.
-- No Windows/WSL deployment testing of model installation or performance.
-- No changes to live Streamlit UI, updater feed, or published releases.
-- No permission/licence determination for commercial redistribution of models.
-
-## Next actions
-
-1. Obtain and verify appropriately licensed pretrained model files (size,
-   upstream checksum, model card) in optional isolated environments.
-2. Build a human-rated benchmark with real, lawfully acquired music excerpts.
-3. Run the exact same dataset against each model, compare per-query NDCG@3,
-   precision@3, processing time and RAM/VRAM.
-4. Only after a reproducible win, decide whether to put a model into
-   Vibe Finder's production search pipeline. Preserve an easy DSP fallback.
+- Test capture and timing on actual Windows outputs; calibrate capture levels.
+- Build a human-rated real-music dataset to compare DSP against AI models.

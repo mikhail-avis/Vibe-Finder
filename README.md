@@ -104,3 +104,24 @@ using the separate 20-second Listen Live capture.
 If a later experimental build fails, use **Restore previous experimental build**. The stable launcher is preserved and continues to work even if experimental installation fails. **Experimental rollback only becomes available after at least one experimental upgrade**, not immediately after installing the first experiment. Avoid running an experimental preview during an experimental update/rollback because Windows can lock in-use files.
 
 The stable and experimental ZIP channels are mutually exclusive. `scripts/build_experimental_release.py` produces the experimental package and manifest; publish its ZIP before activating its `latest.json`. Never publish the optional experimental feed under the stable `releases/latest.json`.
+
+
+## Experimental v0.7.1: links as audio references
+
+The experimental audio lab at `http://localhost:8502` now accepts an uploaded
+audio file **or** a music-page link for **each** side of the comparison.
+Recognised links include YouTube, YouTube Music, SoundCloud, Spotify, Bandcamp,
+Jamendo, Wikimedia Commons and generic public HTTPS music pages.
+
+A streaming page link is *not* automatically downloadable waveform data. Play
+it through your browser, select the Windows speaker or headphones receiving
+the audio, use the optional one-second sound check, and click **Capture** for
+10, 20 or 30 seconds. The app records only the selected output, with explicit
+user action, and lets you replay that WAV to confirm the song before comparing.
+You may use two links, two uploads, or one of each. DSP works immediately;
+CLAP and Essentia need locally verified additional model dependencies.
+No streaming audio is ripped, downloaded or scored from metadata. Respect
+rights and service terms for captured audio.
+
+Install via **Experimental builds** in the stable v0.6.1 sidebar. This is a
+separate v0.7.1 experimental update and does not change the stable release.

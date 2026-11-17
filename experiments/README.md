@@ -100,3 +100,27 @@ Upstream references:
 - https://essentia.upf.edu/models.html
 - https://essentia.upf.edu/machine_learning.html
 - https://essentia.upf.edu/installing.html
+
+## Experimental 0.7.1: music URLs via real playback capture
+
+The experimental Streamlit lab accepts **Upload audio** or **Music link** independently
+for the reference and comparison songs. Recognised services include YouTube,
+YouTube Music, SoundCloud, Spotify, Bandcamp, Jamendo and Wikimedia Commons; other
+public HTTPS music-page links are accepted as browser destinations. Links are
+**never** treated as audio or fetched from streaming services.
+
+On **Windows**, choose an available speaker or Bluetooth output, play the link in
+your browser, then explicitly capture 10, 20 or 30 seconds using Windows WASAPI
+loopback. Repeat for the second track and select **Analyse and compare actual
+audio**. The audio lab offers a 1-second signal check and playback preview of
+each captured sample, so you can confirm the intended song was recorded before
+comparing. Recording duration does not include Windows device startup time.
+
+Audio bytes remain in Streamlit session memory until discarded/session end; the
+backend writes temporary WAV files only during comparison, then deletes them.
+YouTube/Spotify audio is not downloaded, ripped or inferred from metadata. Use
+only playback you're authorised to analyse, and respect each site's terms.
+This is a Windows-only capture path, not an automatic YouTube-to-waveform API.
+
+CLAP and Essentia model weights remain separate optional dependencies. DSP works
+with the standard installation and provides the baseline acoustic score.

@@ -24,9 +24,11 @@ class ExperimentalReleaseTests(unittest.TestCase):
                 dest.write_bytes((mod.ROOT / name).read_bytes())
             package, feed = mod.build('example', 'vibe-finder', root)
             manifest = validate_package(package.read_bytes(), '0.0', channel='experimental')
-            self.assertEqual(manifest['version'], '0.7.0')
+            self.assertEqual(manifest['version'], '0.7.1')
             self.assertEqual(manifest['channel'], 'experimental')
             self.assertIn('experiments/audio_models.py', manifest['files'])
+            self.assertIn('experiments/link_inputs.py', manifest['files'])
+            self.assertIn('live_audio.py', manifest['files'])
             data = json.loads(feed.read_text())
             self.assertEqual(data['channel'], 'experimental')
             self.assertEqual(data['sha256'], hashlib.sha256(package.read_bytes()).hexdigest())
@@ -39,7 +41,7 @@ class ExperimentalReleaseTests(unittest.TestCase):
             apply_pending_experimental(root)
             self.assertEqual(installed_version(root), '0.6.1')
             self.assertEqual((root / 'app.py').read_text(), '# live stable application\n')
-            self.assertEqual(installed_version(root / 'experimental-build'), '0.7.0')
+            self.assertEqual(installed_version(root / 'experimental-build'), '0.7.1')
 
     def test_experiment_ui_works_without_importing_clap_or_essentia(self):
         from experimental_landing import backend_for
