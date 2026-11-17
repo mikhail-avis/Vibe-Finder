@@ -1,40 +1,37 @@
-# Vibe Finder — Windows prototype 0.3 (updates supported)
+# Vibe Finder 0.4 — acoustic music discovery (development build)
 
-**Benchmark:** HXVRMXN — ECLIPSE (Night Drive Phonk), https://www.youtube.com/watch?v=JD0Ve7psY_I
+Vibe Finder analyses real audio to suggest similar-sounding tracks from a sampled set of eligible Jamendo music. Scores are heuristic acoustic similarity indices, not probabilities or proof of shared musical style.
 
-## What you can do
+## Choose one reference song
 
-- **Normal mode:** paste a YouTube link and click **Find music**. Vibe Finder identifies the video via YouTube's oEmbed information and searches public music catalogue *metadata* for discovery suggestions. **This is not actual acoustic similarity.**
-- **Advanced mode:** compare authorised reference audio against local audio files using rhythm, bass, timbre, atmosphere and energy estimates. The results are heuristic, not proven sound-alike probabilities.
+- **Upload audio:** Provide a WAV, FLAC, MP3, OGG or M4A file that you have permission to analyse. The app extracts a temporary audio fingerprint, then searches for eligible Jamendo candidate tracks and ranks them by actual audio features.
+- **Paste a YouTube link:** A YouTube URL identifies a song, but does not provide downloadable audio through the standard YouTube API. On Windows, **Listen Live** can, with your permission and subject to the audio service's terms, capture a 20-second sample of the computer's digital speaker output. It does not use the microphone, but other computer sounds may be present. A URL alone cannot trigger acoustic matching.
+- **Metadata search fallback:** A separate tool finds title/genre-based leads. They are **not** audio comparisons.
 
-## First-time Windows setup
+## Jamendo catalogue
 
-1. Install Python 3.11 or 3.12 if needed; tick **Add Python to PATH**.
-2. Extract this ZIP once into a **permanent** folder, such as `C:\AI\Vibe-Finder`. **Don't delete the folder after you open it.**
-3. Double-click `run-windows.bat`. First launch creates `.venv` and installs free packages.
-4. Open http://localhost:8501 if your browser doesn't open automatically.
-5. Paste a YouTube link and press **Find music**. Reference audio is not needed in normal mode.
+Create an app at https://devportal.jamendo.com/ and enter its public **Client ID** in Vibe Finder's sidebar. The ID is saved in `user-data/jamendo.json` on your own computer, not in source control. Do not enter your Jamendo password or secret. In **Jamendo catalogue settings**, select **Test Jamendo connection (metadata only)** to confirm the API accepts your ID; this does not download music or prove sound comparison works.
 
-## Updating without reinstalling
+Jamendo's API is used to discover candidates across several styles. Only tracks marked `audiodownload_allowed` with a trusted Jamendo download URL are sampled. Candidate audio is stored temporarily, analysed, and deleted; only compact feature fingerprints are cached locally. Licence and service permissions still apply. **This is not a search of all music on Jamendo, YouTube or Spotify.**
 
-This version adds an **App updates** panel in the left sidebar. Updates are applied to the **same installed folder**; your `library` folder, `.venv`, saved settings, and `update-source.json` aren't replaced.
+## Performance model
 
-**Update ZIP (working now):** When a newer official Vibe Finder release ZIP is available, open **App updates**, upload the ZIP, click **Prepare this update**, then close Vibe Finder and double-click your existing `run-windows.bat`. The launcher installs the staged update **before** reopening the app. If the required packages change, the launcher installs updated dependencies on the next launch. You do **not** extract the update ZIP or reinstall the app.
+Vibe Finder can download up to **four** eligible candidate tracks concurrently and analyse up to **two** tracks in separate processes, subject to queue back-pressure so downloads cannot create an unlimited pile of temporary files. Provisional best matches appear as completed tracks arrive. Cache hits bypass network downloads and analysis. Actual speed depends on track length, connection, CPU and catalogue response times.
 
-**Online updates (ready for a release host, not live yet):** The panel also has **Check for online updates**. `update-source.json` in this package is preconfigured to the public GitHub update feed. Once `releases/latest.json` and the ZIP are published, the app can check for new versions. Then **Check for online updates** / **Download and prepare update** works without manually fetching ZIP files. A public GitHub repository hosts the free release feed. To point an older installation at the feed, put the HTTPS URL into `update-source.json` under `manifest_url`. The manifest must contain `app_id` (`vibe-finder`), `version`, `archive_url` (same HTTPS host), and `sha256` for the whole ZIP.
+The offline benchmark uses generated WAV tracks, not Jamendo downloads. Run `python scripts/bench_pipeline.py --tracks 16 --seconds 15 --latency-ms 250` to compare one worker against 4 download / 2 analysis workers on your machine.
 
-**Moving from older Vibe Finder 0.1/0.2:** This is a **one-time switch** to the updater-equipped version. Extract version 0.3 to a permanent folder and copy the old `library` contents to the new folder if you had local tracks. After that, use the updater rather than reinstalling future versions.
+## Windows setup and updates
 
-**Safety:** Official release ZIPs have a per-file checksum manifest; the updater rejects mismatches, attempts to overwrite personal folders, downgrades and path traversal, and backs up replaced files for rollback on failed copying. Remote download requires HTTPS and a matching SHA-256 hash; never install updates from an untrusted source. Restart the app before a staged update is applied. `run-windows.bat` stays untouched to maintain a safe launcher.
+- Supported development targets: Python 3.11 or 3.12 on Windows; first-time installs require a working Python installation added to PATH.
+- For a full first-time installation, extract the full app distribution to a persistent folder such as `C:\AI\Vibe-Finder`, then double-click `run-windows.bat` and open http://localhost:8501.
+- If you're on Vibe Finder 0.3, **do not extract a partial release ZIP over your installation**. Instead, when an official newer version is available, open **App updates**, upload the release ZIP, click **Prepare this update**, close the app, and restart with the existing `run-windows.bat` launcher.
+- The updater safeguards personal folders and settings, checks per-file hashes and stages updates before restart. Only use releases from a trusted source.
 
-## Limitations
+## Current limitations and verification
 
-- YouTube links don't expose unrestricted audio downloads via YouTube's API. This prototype doesn't rip them.
-- Apple's Search API supplies catalogue metadata and store listings only; previews aren't downloaded, played, or analysed.
-- Discovery results are leads, **not measured audio matches**; click-through YouTube buttons search by artist/title.
-- Online updates require the published ZIP and manifest in the public GitHub repository and a newer version number; no newer update is promised by the initial 0.3.0 publication.
-- The Streamlit app has not been run or verified on the user's Windows PC.
+- Jamendo's accessible sample may not include niche tracks or provide good stylistic matches. No candidate is ranked without actual audio analysis, but rankings are not yet calibrated against human similarity judgements.
+- The model does not automatically acquire a YouTube waveform; opt-in live capture is a separate Windows capability.
+- The 0.4 development build has passed local unit tests and synthetic-audio benchmarks, including a mocked Jamendo-to-audio-fingerprint integration test. A **real Jamendo API and download test**, plus Windows WASAPI capture, still require validation on a Windows machine. The development environment cannot reach Jamendo live.
+- This README describes a development build; publication as a GitHub online update is a separate step.
 
-## Test commands
-
-`python -m unittest discover -s tests -v`
+Run tests with `python -m unittest discover -s tests -v`.

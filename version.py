@@ -1,2 +1,2 @@
 """Vibe Finder application release identifier."""
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"

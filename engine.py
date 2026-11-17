@@ -25,10 +25,10 @@ def _sanitize(values: Any) -> list[float]:
     return np.nan_to_num(array, nan=0.0, posinf=0.0, neginf=0.0).round(7).tolist()
 
 
-def analyse(path: str | Path) -> dict[str, Any]:
-    """Create five groups of descriptors from up to two minutes of audio."""
+def analyse(path: str | Path, max_seconds: int = MAX_SECONDS) -> dict[str, Any]:
+    """Create five groups of descriptors from the first max_seconds of audio."""
     path = Path(path)
-    y, sr = librosa.load(str(path), sr=SR, mono=True, duration=MAX_SECONDS)
+    y, sr = librosa.load(str(path), sr=SR, mono=True, duration=max_seconds)
     if len(y) < SR * 2:
         raise ValueError("Audio must be at least two seconds long.")
     # Peak-normalise for level-independent comparison.

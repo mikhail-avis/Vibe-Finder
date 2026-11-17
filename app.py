@@ -1,22 +1,27 @@
-"""Vibe Finder: link-first discovery and optional local acoustic matching."""
+"""Vibe Finder: acoustic discovery from an upload or opt-in live Windows audio."""
 from __future__ import annotations
 
 import tempfile
+import json
+import os
 from pathlib import Path
 from urllib.parse import quote_plus
 
 import streamlit as st
 
 from discovery import BENCHMARK_URL, discover_tracks, get_video_title, youtube_id
-from engine import GROUPS, analyse, compare, library_features
+from engine import GROUPS, analyse, compare
 from version import APP_VERSION
+from jamendo import JamendoError, find_candidates, valid_client_id, test_connection
+from candidate_pipeline import scan_candidates
+from live_audio import CaptureError, capture_output
 from updater import UpdateError, check_online, stage_online, stage_package
 
 ROOT = Path(__file__).resolve().parent
 
 st.set_page_config(page_title="Vibe Finder • Find the vibe", page_icon="🎧", layout="wide")
 st.title("🎧 Vibe Finder")
-st.caption(f"Prototype {APP_VERSION} • Paste a YouTube link to discover music. No reference file required.")
+st.caption(f"Prototype {APP_VERSION} • Genuine audio analysis for authorised music. Choose a reference upload or opt-in Windows listening.")
 
 with st.sidebar.expander(f"App updates (v{APP_VERSION})", expanded=False):
     st.write("Updates go into this same folder. Your music library and settings stay put.")
@@ -51,100 +56,178 @@ with st.sidebar.expander(f"App updates (v{APP_VERSION})", expanded=False):
                 st.error(f"Download or verification failed: {exc}")
     st.caption("Only apply ZIP files from a source you trust. The existing launcher is kept in place.")
 
-st.subheader("Your reference song")
-reference_url = st.text_input("Paste a YouTube link", value=BENCHMARK_URL)
-if youtube_id(reference_url):
-    st.link_button("Listen on YouTube", f"https://www.youtube.com/watch?v={youtube_id(reference_url)}")
 
-with st.expander("Advanced: optional real-audio matching"):
-    st.write("Link-only discovery searches catalogue metadata. To compare actual bass, rhythm, atmosphere and energy, supply an audio file you are authorised to analyse and a folder of candidate tracks.")
-    reference_upload = st.file_uploader("Reference audio (optional)", type=["wav", "flac", "mp3", "ogg", "m4a"])
-    folder = st.text_input("Folder of candidate audio files", value=str(ROOT / "library"))
+SETTINGS_FILE = ROOT / "user-data" / "jamendo.json"
+
+
+def saved_client_id() -> str:
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return str(data.get("client_id", ""))
+    except (OSError, ValueError):
+        return ""
+
+
+with st.sidebar.expander("Jamendo catalogue settings", expanded=True):
+    st.write("Enter the Jamendo developer Client ID once. Saved only on this computer, not uploaded to GitHub.")
+    client_id = st.text_input("Jamendo Client ID", value=os.environ.get("JAMENDO_CLIENT_ID") or saved_client_id(), max_chars=64)
+    if st.button("Save Jamendo Client ID"):
+        if not valid_client_id(client_id):
+            st.error("Enter the application Client ID, not a password or secret.")
+        else:
+            SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS_FILE.write_text(json.dumps({"client_id": client_id.strip()}), encoding="utf-8")
+            st.success("Client ID saved locally. It will be available next time.")
+    if st.button("Test Jamendo connection (metadata only)"):
+        if not valid_client_id(client_id):
+            st.error("Enter a valid Jamendo Client ID first.")
+        else:
+            try:
+                diagnostic = test_connection(client_id)
+                st.success(f"Jamendo API responded. {diagnostic['returned']} tracks returned; "
+                           f"{diagnostic['downloadable']} have eligible download links in this small sample.")
+                st.caption("Connection confirmed, but this does not test audio downloads or sound matching. "
+                           "Use Find Similar Music for the full test.")
+            except JamendoError as exc:
+                st.error(f"Jamendo connection test failed: {exc}")
+    st.caption("Jamendo offers independent and Creative Commons music; this is not a search of every recording online.")
+
+st.subheader("1. Choose one reference song")
+input_mode = st.radio("Reference input", ["Upload an audio file", "Paste a YouTube link"], horizontal=True)
+reference_upload = None
+reference_url = ""
+if input_mode == "Upload an audio file":
+    reference_upload = st.file_uploader("Choose your reference song", type=["wav", "flac", "mp3", "ogg", "m4a"])
+    st.caption("Upload one file you have permission to analyse. No comparison songs needed.")
+else:
+    reference_url = st.text_input("YouTube link", value=BENCHMARK_URL)
+    video_id = youtube_id(reference_url)
+    if video_id:
+        st.link_button("Open the song on YouTube", f"https://www.youtube.com/watch?v={video_id}")
+    st.info("A YouTube URL alone provides metadata, not the audio waveform. For an acoustic match, play audio you are authorised to capture on this Windows PC, then select Listen Live. The app does not rip YouTube audio.")
+    if st.button("Listen Live: capture 20 seconds of computer output", disabled=not bool(video_id)):
+        try:
+            with st.spinner("Listening to your Windows output for 20 seconds…"):
+                captured = capture_output(20)
+                with tempfile.TemporaryDirectory() as td:
+                    wav_path = Path(td) / "reference.wav"
+                    wav_path.write_bytes(captured)
+                    features = analyse(wav_path)
+            st.session_state["captured_reference"] = {"url": reference_url, "features": features}
+            st.success(f"Audio analysed. Estimated tempo: {features['bpm']:.1f} BPM. Ready to find similar music.")
+        except (CaptureError, ValueError, OSError) as exc:
+            st.error(f"Live audio capture failed: {exc}")
+    captured = st.session_state.get("captured_reference")
+    if captured and captured["url"] == reference_url:
+        st.caption("Captured audio fingerprint ready. No microphone or permanent recording used.")
+
+with st.expander("Advanced matching preferences"):
     cols = st.columns(5)
     starting = {"Rhythm": 5, "Bass": 5, "Timbre": 4, "Atmosphere": 4, "Energy": 3}
     weights = {name: col.slider(name, 0, 5, starting[name]) for name, col in zip(GROUPS, cols)}
+    sample_count = st.slider("Number of Jamendo candidate tracks to analyse", 4, 30, 16, step=2)
+    st.caption("Speed: up to 4 simultaneous downloads and 2 DSP analysis processes. Results update as tracks finish. Previously analysed tracks reuse local fingerprints.")
 
-st.caption("**Link-only results are genre/metadata-based discovery leads, not verified sound-alikes.** Genuine acoustic comparisons still need authorised reference audio or a licensed/pre-analysed feature source.")
-
-if st.button("Find music", type="primary", use_container_width=True):
-    if not youtube_id(reference_url):
-        st.error("Please enter a valid YouTube video link first.")
+st.subheader("2. Find similar-sounding music")
+if st.button("Find Similar Music", type="primary", use_container_width=True):
+    st.session_state.pop("last_results", None)
+    st.session_state.pop("last_summary", None)
+    if not valid_client_id(client_id):
+        st.error("Set your Jamendo Client ID in the sidebar first.")
         st.stop()
-
-    with st.spinner("Identifying the linked track…"):
-        try:
-            title = get_video_title(reference_url)
-        except (ValueError, LookupError) as exc:
-            st.error(str(exc))
-            st.stop()
-    st.write(f"**Identified:** {title}")
-
-    if reference_upload is None:
-        st.info("Link-only mode: looking for songs in a public music catalogue. These results have **not** been compared by their audio.")
-        with st.spinner("Searching music metadata…"):
-            tracks, issues = discover_tracks(title, limit=10)
-        if tracks:
-            st.subheader("Discoveries to try")
-            for n, item in enumerate(tracks, 1):
-                with st.container(border=True):
-                    left, right = st.columns([3, 1])
-                    with left:
-                        st.write(f"**{n}. {item['artist']} — {item['track']}**")
-                        if item["genre"]:
-                            st.caption(f"Store genre: {item['genre']} • not an audio similarity score")
-                    with right:
-                        st.link_button("Find on YouTube", item["youtube_search_url"])
-                        st.link_button("Store listing", item["store_url"])
-            st.caption("These are catalogue search leads, not a ranked analysis of actual sound. YouTube buttons search by artist and title and may return several results.")
-        else:
-            st.warning("No catalogue discoveries came back for this track. This doesn't mean no similar songs exist. Try a later run or use Advanced audio matching.")
-        if issues:
-            with st.expander("Catalogue connection details"):
-                st.write("\n".join(issues))
-    else:
-        if not Path(folder).expanduser().is_dir():
-            st.error("The candidate library folder doesn't exist. Enter a valid folder in Advanced settings.")
-            st.stop()
-        if not any(weights.values()):
-            st.error("Turn up at least one of the five weights.")
-            st.stop()
-        try:
-            with tempfile.TemporaryDirectory() as scratch:
+    if not any(weights.values()):
+        st.error("Select at least one positive matching weight.")
+        st.stop()
+    try:
+        if input_mode == "Upload an audio file":
+            if reference_upload is None:
+                st.warning("Upload a reference song first.")
+                st.stop()
+            with tempfile.TemporaryDirectory() as td:
                 ext = Path(reference_upload.name).suffix.lower()
-                target = Path(scratch) / f"reference{ext}"
-                target.write_bytes(reference_upload.getvalue())
-                ref_features = analyse(target)
-        except Exception as exc:
-            st.error(f"Reference audio could not be analysed: {exc}")
-            st.stop()
-
-        bar = st.progress(0, text="Scanning library")
-        def update(done, total):
-            bar.progress(done / max(total, 1), text=f"Analysing files: {done}/{total}")
-        with st.spinner("Comparing actual audio…"):
-            indexed, errors = library_features(folder, progress=update)
-        bar.empty()
-        if errors:
-            with st.expander(f"{len(errors)} file(s) couldn't be analysed"):
-                st.write("\n".join(errors))
-        if not indexed:
-            st.warning("No supported audio files in the candidate library yet.")
+                path = Path(td) / ("reference" + ext)
+                path.write_bytes(reference_upload.getvalue())
+                with st.spinner("Analysing your reference audio…"):
+                    reference = analyse(path, max_seconds=50)
         else:
-            scored = [{**item, **compare(ref_features, item["features"], weights)} for item in indexed]
-            scored.sort(key=lambda item: item["score"], reverse=True)
-            st.success(f"Compared reference audio against {len(scored)} local tracks (estimated reference BPM: {ref_features['bpm']}).")
-            st.subheader("Closest local audio matches")
-            for rank, item in enumerate(scored[:10], 1):
-                with st.container(border=True):
-                    left, right = st.columns([3, 1])
-                    with left:
-                        st.write(f"**{rank}. {item['path'].stem}**")
-                        st.caption(f"Closest features: {', '.join(item['strengths'])} • estimated BPM: {item['features']['bpm']}")
-                        st.audio(str(item["path"]))
-                    with right:
-                        st.metric("Heuristic match index", f"{item['score']:.1f}/100")
-                        st.link_button("Search YouTube", "https://www.youtube.com/results?search_query=" + quote_plus(item["path"].stem))
-            st.caption("Audio match scores are heuristic indices, not probabilities or a validated semantic similarity measure.")
+            captured = st.session_state.get("captured_reference")
+            if not captured or captured["url"] != reference_url:
+                st.warning("Play the reference song and press Listen Live before searching. A YouTube link alone cannot be acoustically analysed.")
+                st.stop()
+            reference = captured["features"]
+        with st.spinner("Looking for downloadable, authorised Jamendo candidate tracks…"):
+            candidates, warnings = find_candidates(client_id, max_tracks=sample_count)
+        if not candidates:
+            st.warning("No eligible Jamendo candidates returned. Check the client ID or try again later.")
+            if warnings:
+                st.write(warnings)
+            st.stop()
+        scored = []
+        skipped = []
+        bar = st.progress(0, text="Starting parallel audio comparisons")
+        live_status = st.empty()
+        cache_path = ROOT / "user-data" / "jamendo-fingerprints.json"
+        for event in scan_candidates(candidates, reference, weights, cache_path,
+                                     download_workers=4, analysis_workers=2):
+            if event["match"]:
+                scored.append(event["match"])
+            if event["error"]:
+                skipped.append(event["error"])
+            bar.progress(event["completed"] / event["total"],
+                         text=f"Processed {event['completed']} / {event['total']} songs • {len(scored)} matches")
+            if scored:
+                leaders = sorted(scored, key=lambda item: item["score"], reverse=True)[:3]
+                live_status.write("Best matches so far (provisional): " + " • ".join(
+                    f"{song['artist']} — {song['title']} ({song['score']:.1f})" for song in leaders))
+        bar.empty()
+        live_status.empty()
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        st.session_state["last_results"] = scored
+        st.session_state["last_summary"] = {"candidate_count": len(candidates), "skipped": skipped, "warnings": warnings, "reference_bpm": reference["bpm"]}
+    except Exception as exc:
+        st.error(f"Discovery could not finish: {exc}")
+
+if "last_results" in st.session_state:
+    scored = st.session_state["last_results"]
+    summary = st.session_state["last_summary"]
+    if scored:
+        st.success(f"Acoustically compared {len(scored)} Jamendo recordings from {summary['candidate_count']} sampled candidates. Reference BPM: {summary['reference_bpm']:.1f}.")
+        for rank, track in enumerate(scored[:10], 1):
+            with st.container(border=True):
+                left, right = st.columns([4, 1])
+                with left:
+                    st.write(f"**{rank}. {track['artist']} — {track['title']}**")
+                    st.caption(f"Closest sonic characteristics: {', '.join(track['strengths'])} • estimated BPM: {track['bpm']:.1f}")
+                    st.link_button("Listen on Jamendo", track["listen_url"])
+                    if track.get("license_url"):
+                        st.link_button("Track licence", track["license_url"])
+                with right:
+                    st.metric("Heuristic match", f"{track['score']:.1f}/100")
+    else:
+        st.warning("Candidates were found but none could be decoded and analysed. This isn't evidence that similar songs don't exist.")
+    if summary["skipped"] or summary["warnings"]:
+        with st.expander("Unanalysed candidates / API issues"):
+            st.write("\n".join((summary["warnings"] + summary["skipped"])[:35]))
+    st.caption("Only the sampled, artist-downloadable Jamendo tracks were scored. Fingerprints are cached locally without saving MP3s. Scores are uncalibrated similarity indices, not probabilities, and cannot claim to rank all Jamendo music.")
+
+with st.expander("Fallback: YouTube metadata-only discovery"):
+    st.caption("This feature does NOT compare audio; it's here for when a reference recording cannot be analysed.")
+    fallback_url = st.text_input("YouTube link for metadata search", value=reference_url or BENCHMARK_URL, key="fallback_url")
+    if st.button("Find metadata-based leads"):
+        if not youtube_id(fallback_url):
+            st.error("Enter a valid YouTube link.")
+        else:
+            try:
+                title = get_video_title(fallback_url)
+                tracks, issues = discover_tracks(title, limit=10)
+                st.write(f"Identified: **{title}**")
+                for track in tracks:
+                    st.write(f"{track['artist']} — {track['track']}")
+                    st.link_button("Find on YouTube", track["youtube_search_url"])
+                if issues:
+                    st.write(issues)
+            except (ValueError, LookupError) as exc:
+                st.error(str(exc))
 
 st.divider()
-st.caption("YouTube links are used for track identification and listening—not audio ripping. The link-only catalogue lookup uses Apple's Search API for metadata and store links only; no Apple preview audio is downloaded or analysed. Advanced matching stays on your PC.")
+st.caption("No YouTube ripping. Listen Live captures opt-in system output, potentially including notification sounds, not room audio. Only analyse audio you're permitted to capture. Jamendo candidate audio is temporary and not redistributed. Jamendo artist download permissions and per-track licences are respected.")
