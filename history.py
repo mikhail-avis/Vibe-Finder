@@ -5,9 +5,24 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 import tempfile
 
 MAX_RECENT = 30
+
+
+def _safe_listen_url(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    try:
+        url = urlsplit(value)
+        if (url.scheme == "https" and url.username is None and url.password is None
+                and url.hostname in {"www.jamendo.com", "jamendo.com", "ccmixter.org",
+                                     "www.ccmixter.org", "commons.wikimedia.org"}):
+            return value[:512]
+    except ValueError:
+        pass
+    return ""
 
 
 def read_history(path: str | Path) -> list[dict]:
@@ -35,6 +50,8 @@ def save_search(path: str | Path, *, reference_label: str, matches: list[dict],
         "matches": [{"id": str(m.get("id", ""))[:40],
                      "artist": str(m.get("artist", ""))[:150],
                      "title": str(m.get("title", ""))[:150],
+                     "source": str(m.get("source", "Jamendo"))[:80],
+                     "listen_url": _safe_listen_url(m.get("listen_url")),
                      "score": float(m.get("score", 0))} for m in matches[:10]],
     }
     payload = json.dumps([entry, *read_history(path)][:MAX_RECENT], ensure_ascii=False)

@@ -11,11 +11,15 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 from pathlib import Path
+from typing import Mapping
 from urllib.parse import urljoin, urlsplit
 
 import requests
 
 API_URL = "https://api.jamendo.com/v3.0/tracks/"
+# Public Jamendo application identifier, NOT a password or private API secret.
+# It makes the bundled catalogue integration work without any user setup.
+DEFAULT_CLIENT_ID = "fdfc0cdf"
 MAX_AUDIO_BYTES = 16 * 1024 * 1024
 MAX_SEARCH_RESULTS = 32
 MAX_REDIRECTS = 3
@@ -31,6 +35,28 @@ def valid_client_id(value: str) -> bool:
     # possible future alphanumeric IDs; reject punctuation and URL inputs.
     return bool(re.fullmatch(r"[A-Za-z0-9]{8,64}", value.strip()))
 
+
+
+def resolve_client_id(settings_file: Path, *, environment: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """Choose a usable public application ID without requiring user input.
+
+    Priority: valid environment override, valid locally saved override, built-in
+    public ID. Bad/corrupt local settings cannot make discovery unusable.
+    """
+    source = os.environ if environment is None else environment
+    configured = str(source.get("JAMENDO_CLIENT_ID", "")).strip()
+    if valid_client_id(configured):
+        return configured, "environment override"
+
+    try:
+        data = json.loads(Path(settings_file).read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            saved = str(data.get("client_id", "")).strip()
+            if valid_client_id(saved):
+                return saved, "saved override"
+    except (OSError, ValueError, TypeError):
+        pass
+    return DEFAULT_CLIENT_ID, "built-in default"
 
 def _api_json(client_id: str, *, tag: str, limit: int, session=requests):
     if not valid_client_id(client_id):

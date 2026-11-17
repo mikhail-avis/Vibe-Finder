@@ -1,4 +1,4 @@
-"""Bounded parallel acoustic scoring of eligible Jamendo candidates.
+"""Bounded parallel acoustic scoring of licensed, downloadable catalogue candidates.
 
 Downloads use up to four threads (network I/O); DSP feature extraction uses up
  to two processes (CPU).  Audio remains in a TemporaryDirectory and is removed
@@ -19,7 +19,8 @@ import tempfile
 from typing import Any, Callable, Iterator
 
 from engine import analyse, compare
-from jamendo import temporary_audio
+from downloaders import download_track_audio
+from urllib.parse import urlsplit
 
 CACHE_SCHEMA = 1
 FINGERPRINT_VERSION = "dsp50-v2"
@@ -65,7 +66,7 @@ def _extract_features(path: Path) -> dict:
 def scan_candidates(
     candidates: list[dict], reference: dict, weights: dict,
     cache_file: Path, *, download_workers: int = 4, analysis_workers: int = 2,
-    downloader: Callable = temporary_audio,
+    downloader: Callable = download_track_audio,
     analyser: Callable = _extract_features,
     analysis_executor_cls: type = ProcessPoolExecutor,
 ) -> Iterator[dict[str, Any]]:
@@ -126,7 +127,10 @@ def scan_candidates(
                     except StopIteration:
                         exhausted = True
                         break
-                    dest = folder / f"candidate_{idx}.mp3"
+                    suffix = Path(urlsplit(str(track.get("audio_url", ""))).path).suffix.lower()
+                    if suffix not in {".mp3", ".wav", ".ogg", ".oga", ".flac", ".m4a", ".opus"}:
+                        suffix = ".mp3"
+                    dest = folder / f"candidate_{idx}{suffix}"
                     fut = download_pool.submit(downloader, track, dest)
                     downloads[fut] = (track, dest)
 

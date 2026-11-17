@@ -21,7 +21,7 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_FILES = (
     "app.py", "engine.py", "discovery.py", "jamendo.py", "candidate_pipeline.py",
-    "adaptive_discovery.py", "history.py", "live_audio.py", "updater.py", "version.py",
+    "adaptive_discovery.py", "history.py", "catalogues.py", "downloaders.py", "live_audio.py", "updater.py", "version.py",
     "requirements.txt", "README.md",
 )
 

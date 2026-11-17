@@ -20,10 +20,10 @@ class ReleaseBuildTests(unittest.TestCase):
                 (root / name).write_bytes((mod.ROOT / name).read_bytes())
             package, feed = mod.build('example-user', 'vibe-finder', root)
             validated = validate_package(package.read_bytes(), '0.2.0')
-            self.assertEqual(validated['version'], '0.5.1')
+            self.assertEqual(validated['version'], '0.6.0')
             data = json.loads(feed.read_text())
             self.assertEqual(data['app_id'], 'vibe-finder')
-            self.assertEqual(data['archive_url'], 'https://raw.githubusercontent.com/example-user/vibe-finder/main/releases/v0.5.1.zip')
+            self.assertEqual(data['archive_url'], 'https://raw.githubusercontent.com/example-user/vibe-finder/main/releases/v0.6.0.zip')
             with zipfile.ZipFile(package) as z:
                 self.assertEqual(z.read('app.py'), (root / 'app.py').read_bytes())
 

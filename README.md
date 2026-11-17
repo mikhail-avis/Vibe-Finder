@@ -1,6 +1,25 @@
-# Vibe Finder 0.5.1 — acoustic music discovery (development build)
+# Vibe Finder 0.6.0 — multi-catalogue acoustic discovery (development build)
 
 Vibe Finder analyses real audio to suggest similar-sounding tracks from a sampled set of eligible Jamendo music. Scores are heuristic acoustic similarity indices, not probabilities or proof of shared musical style.
+
+## New in 0.6.0: more catalogues, genuine audio comparisons
+
+**No search result is scored using metadata or title similarity.** All supported sources return candidate *audio file* URLs with a Creative Commons/public-domain licence. The app downloads allowed audio into a temporary directory, extracts DSP waveform descriptors and ranks only successfully decoded recordings; the audio files are removed afterward. Metadata leads are still available as a separate, clearly labelled non-acoustic fallback.
+
+- **Jamendo** — downloadable tracks explicitly permitted by the artist, using your existing saved application Client ID or the included default.
+- **ccMixter** — Creative Commons remixes and tracks via its public Query API. Only records with a recognised CC deed and a trusted downloadable audio file are analysed.
+- **Wikimedia Commons** — free-licensed audio files obtained through MediaWiki's file-search API. Only allowed audio formats, trusted download hosts, limited file sizes, and clear licence declarations qualify. Commons may include audio recordings that are not conventional songs; matching quality can vary.
+
+**Which sources?** The **Advanced matching preferences** panel has an *Acoustic comparison catalogues* selector. All three are enabled initially. The candidate budget is divided between enabled providers; failures show warnings and never silently become metadata-only results. A second adaptive search can focus on promising sound styles.
+
+**Testing status:** Both added adapters have been exercised through mocked API and download responses with **real DSP analysis of generated WAV waveforms**. Their live public endpoints and Windows playback are **not yet confirmed on your PC**, so provider-specific issues may still emerge. The test verifies an audio-processing pathway, not matching accuracy against commercial songs. Spotify and YouTube are not additional sources for downloading/analysing their hosted music; a URL alone is not a waveform.
+
+**Usage and rights:** Follow each recording's licence/attribution requirements. Do not use the catalogue integration for distribution, copying licensed material beyond authorised analysis, or circumventing streaming restrictions. Some CC licences prohibit commercial reuse. Jamendo's API terms limit commercial usage without licensing arrangements.
+
+## What's new in 0.5.2
+
+- **No Jamendo setup required:** The app automatically uses the bundled public Jamendo application Client ID (`fdfc0cdf`), without requesting account details or manual entry. A valid `JAMENDO_CLIENT_ID` environment variable or saved local override takes precedence. Previous user overrides are preserved. Invalid/corrupt settings fall back to the bundled ID.
+- **Advanced connection options:** The sidebar can test the API, save a different public Client ID, or restore the built-in value. The bundled ID is not a secret. Live Jamendo availability and rate limits still depend on the provider.
 
 ## What's new in 0.5
 
@@ -32,7 +51,7 @@ The signal test reports peak percentage and RMS dBFS. It checks whether a digita
 
 ## Jamendo catalogue
 
-Create an app at https://devportal.jamendo.com/ and enter its public **Client ID** in Vibe Finder's sidebar. The ID is saved in `user-data/jamendo.json` on your own computer, not in source control. Do not enter your Jamendo password or secret. In **Jamendo catalogue settings**, select **Test Jamendo connection (metadata only)** to confirm the API accepts your ID; this does not download music or prove sound comparison works.
+Vibe Finder includes its own **public Jamendo Client ID**, so there is nothing to register or enter for normal use. Open **Jamendo catalogue connection** in the sidebar to test the API (metadata only). If you have a separate Jamendo developer app, use **Advanced: override the Client ID** to save its public ID locally in `user-data/jamendo.json`. A valid `JAMENDO_CLIENT_ID` environment variable takes precedence. Never enter a Jamendo password or private secret. A successful API test confirms catalogue access, not waveform matching.
 
 Jamendo's API is used to discover candidates across several styles. Only tracks marked `audiodownload_allowed` with a trusted Jamendo download URL are sampled. Candidate audio is stored temporarily, analysed, and deleted; only compact feature fingerprints are cached locally. Licence and service permissions still apply. **This is not a search of all music on Jamendo, YouTube or Spotify.**
 

@@ -1,28 +1,23 @@
-# Vibe Finder 0.5.0 - development status
+# Vibe Finder 0.6.0 — development checkpoint
 
-Built from 0.4.2 updater-fix staging plus the verified 0.4.1 GitHub source.
+Built on the verified published GitHub v0.5.1 application, including automatic Jamendo ID setup work from the unpublished 0.5.2 staging release.
 
 ## Implemented
-- Adaptive broad/focused acoustic discovery bounded by user-selected candidate budget
-- Fair round-robin Jamendo candidates and up to four concurrent metadata requests
-- Rhythm short-lag attack recurrence and bass modulation descriptors; fingerprint cache version v2
-- Explained per-category scores and weights
-- On-PC metadata-only search history with clear button
-- Playback peak meter for 3-second test
-- GitHub Raw manifest cache-busting and diagnostic versions
+- Three selectable discovery catalogues: Jamendo, ccMixter and Wikimedia Commons
+- Every candidate must expose licence metadata and a trustworthy, downloadable audio URL
+- Bounded, redirect-validated, size-limited temporary audio downloads (no music API stream ripping)
+- Existing per-track 50-second waveform DSP, weighted feature scoring, adaptive style search and fingerprint caching shared across all sources
+- Fair budget splitting across selected catalogues and source/provider labels on match results
+- Jamendo ID preference logic: local env override, saved override, built-in default (no user input needed)
+- Earlier quick sound-level test, Windows device selection and self-update functionality preserved
 
-## Test results
-- 27 automated tests passing on Linux/Python 3.13; unit tests, mocked network, real synthetic WAV analysis, simulated 0.4.1-to-0.5 upgrade, mocked Windows WASAPI playback device selection
-- Tests do not demonstrate quality improvement on real songs or compatibility with real Jamendo servers and real Windows audio hardware
-- Version 0.5 is a prototype; do not represent heuristic match score as validated accuracy
+## Verification
+- Automated suite includes real synthetic WAV generation, mocked source APIs / downloaded audio, comparison scoring and fingerprint cache checks
+- Test suite does not validate live API response shapes, remote providers' availability, Windows device performance or human-rated match accuracy
+- Live provider validation is needed after installation on a Windows machine
 
-## Outstanding
-1. Actual Windows install/update and 3-second playback test (speakers and Bluetooth)
-2. Live Jamendo metadata and downloads with user's local Client ID (never committed)
-3. Compare search ranking against a human-rated real recording similarity set
-4. Investigate refined segment-based matching/ML embeddings after evaluation
-
-## Safeguards
-- Preserve `user-data`, `library`, `update-source.json` and `run-windows.bat` when updating
-- Publish archive and code before switching `releases/latest.json`
-- Do not save raw copyrighted audio or user's Client ID to GitHub
+## Safety
+- No raw track archive, music files or local settings are intentionally published to GitHub
+- Raw source audio is held temporarily and deleted; only derived fingerprints and local match history persist
+- Online update ZIP is tested before being pushed; update feed must be changed only after validating GitHub's published ZIP checksum
+- Personal folders `library`, `user-data`, `updates`, `.venv` and the launcher are protected by the updater

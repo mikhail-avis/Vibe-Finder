@@ -12,8 +12,9 @@ import streamlit as st
 from discovery import BENCHMARK_URL, discover_tracks, get_video_title, youtube_id
 from engine import GROUPS, analyse, compare
 from version import APP_VERSION
-from jamendo import JamendoError, SEARCH_TAGS, find_candidates, valid_client_id, test_connection
+from jamendo import JamendoError, SEARCH_TAGS, find_candidates, valid_client_id, test_connection, resolve_client_id, DEFAULT_CLIENT_ID
 from candidate_pipeline import scan_candidates
+from catalogues import SOURCES, discover_across_sources
 from adaptive_discovery import search_budgets, focus_styles
 from history import read_history, save_search
 from live_audio import CaptureError, capture_output, list_output_devices, test_output_device
@@ -60,39 +61,35 @@ with st.sidebar.expander(f"App updates (v{APP_VERSION})", expanded=False):
 
 
 SETTINGS_FILE = ROOT / "user-data" / "jamendo.json"
+client_id, client_source = resolve_client_id(SETTINGS_FILE)
 
-
-def saved_client_id() -> str:
-    try:
-        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        return str(data.get("client_id", ""))
-    except (OSError, ValueError):
-        return ""
-
-
-with st.sidebar.expander("Jamendo catalogue settings", expanded=True):
-    st.write("Enter the Jamendo developer Client ID once. Saved only on this computer, not uploaded to GitHub.")
-    client_id = st.text_input("Jamendo Client ID", value=os.environ.get("JAMENDO_CLIENT_ID") or saved_client_id(), max_chars=64)
-    if st.button("Save Jamendo Client ID"):
-        if not valid_client_id(client_id):
-            st.error("Enter the application Client ID, not a password or secret.")
-        else:
-            SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            SETTINGS_FILE.write_text(json.dumps({"client_id": client_id.strip()}), encoding="utf-8")
-            st.success("Client ID saved locally. It will be available next time.")
+with st.sidebar.expander("Jamendo catalogue connection", expanded=False):
+    st.success("Ready — Jamendo Client ID configured automatically.")
+    st.caption(f"Using the {client_source}. No account setup or ID entry is required for music discovery.")
     if st.button("Test Jamendo connection (metadata only)"):
-        if not valid_client_id(client_id):
-            st.error("Enter a valid Jamendo Client ID first.")
-        else:
-            try:
-                diagnostic = test_connection(client_id)
-                st.success(f"Jamendo API responded. {diagnostic['returned']} tracks returned; "
-                           f"{diagnostic['downloadable']} have eligible download links in this small sample.")
-                st.caption("Connection confirmed, but this does not test audio downloads or sound matching. "
-                           "Use Find Similar Music for the full test.")
-            except JamendoError as exc:
-                st.error(f"Jamendo connection test failed: {exc}")
-    st.caption("Jamendo offers independent and Creative Commons music; this is not a search of every recording online.")
+        try:
+            diagnostic = test_connection(client_id)
+            st.success(f"Jamendo API responded: {diagnostic['returned']} tracks found; "
+                       f"{diagnostic['downloadable']} eligible download links in this sample.")
+            st.caption("This tests the API connection, not acoustic matching.")
+        except JamendoError as exc:
+            st.error(f"Jamendo connection failed: {exc}")
+            st.info("If the default ID is no longer accepted, you can set another ID under Advanced settings.")
+    with st.expander("Advanced: override the Client ID"):
+        st.caption("Only change this if you're using a separate Jamendo developer application. The included ID is public, not a secret.")
+        replacement_id = st.text_input("Optional Jamendo Client ID override", value=client_id, max_chars=64)
+        if st.button("Save Client ID override"):
+            if not valid_client_id(replacement_id):
+                st.error("Enter a valid public Jamendo application Client ID.")
+            else:
+                SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                SETTINGS_FILE.write_text(json.dumps({"client_id": replacement_id.strip()}), encoding="utf-8")
+                st.rerun()
+        if st.button("Restore built-in Client ID"):
+            # Only clear the optional override, not any other user files.
+            SETTINGS_FILE.unlink(missing_ok=True)
+            st.rerun()
+    st.caption("Jamendo is a limited catalogue of independent music; it does not search every commercial recording.")
 
 st.subheader("1. Choose one reference song")
 input_mode = st.radio("Reference input", ["Upload an audio file", "Paste a YouTube link"], horizontal=True)
@@ -180,6 +177,11 @@ with st.expander("Advanced matching preferences"):
     starting = {"Rhythm": 5, "Bass": 5, "Timbre": 4, "Atmosphere": 4, "Energy": 3}
     weights = {name: col.slider(name, 0, 5, starting[name]) for name, col in zip(GROUPS, cols)}
     sample_count = st.slider("Maximum Jamendo candidates to analyse", 4, 40, 16, step=2)
+    selected_sources = tuple(st.multiselect(
+        "Acoustic comparison catalogues", SOURCES, default=list(SOURCES),
+        help="Only recordings with a permitted audio download enter the real waveform comparison."
+    ))
+    st.caption("Jamendo + ccMixter + Wikimedia Commons. All selected catalogues run through the same audio analyser; metadata-only entries are excluded.")
     adaptive_enabled = st.checkbox("Adaptive two-stage discovery (explore, then search promising styles)", value=True)
     st.caption("Speed: up to 4 downloads and 2 DSP analysis processes. The adaptive second pass reserves part of your track budget, not extra downloads. Locally cached fingerprints are reused.")
 
@@ -188,7 +190,10 @@ if st.button("Find Similar Music", type="primary", use_container_width=True):
     st.session_state.pop("last_results", None)
     st.session_state.pop("last_summary", None)
     if not valid_client_id(client_id):
-        st.error("Set your Jamendo Client ID in the sidebar first.")
+        st.error("The configured Jamendo Client ID is invalid. Check the advanced connection settings.")
+        st.stop()
+    if not selected_sources:
+        st.error("Select at least one music catalogue in Advanced matching preferences.")
         st.stop()
     if not any(weights.values()):
         st.error("Select at least one positive matching weight.")
@@ -212,9 +217,10 @@ if st.button("Find Similar Music", type="primary", use_container_width=True):
             reference = captured["features"]
         first_budget, second_budget = search_budgets(sample_count, adaptive_enabled)
         with st.spinner("Pass 1: sampling permitted recordings across Jamendo styles…"):
-            candidates, warnings = find_candidates(client_id, max_tracks=first_budget)
+            candidates, warnings = discover_across_sources(client_id, max_tracks=first_budget,
+                                                          sources=selected_sources)
         if not candidates:
-            st.warning("No eligible Jamendo candidates returned. Check the client ID or try again later.")
+            st.warning("No downloadable, licensed audio candidates were found in the selected catalogues. Try another source or check the provider warnings.")
             if warnings:
                 st.write(warnings)
             st.stop()
@@ -249,10 +255,10 @@ if st.button("Find Similar Music", type="primary", use_container_width=True):
             # If the first pass yielded no usable audio, broaden again instead
             # of assuming any genre is relevant to the reference.
             styles = focus or SEARCH_TAGS
-            with st.spinner(f"Pass 2: discovering fresh tracks in {', '.join(styles)}…"):
-                second, issues = find_candidates(client_id, max_tracks=sample_count - len(candidates),
-                                                 tags=styles,
-                                                 exclude_ids={c['id'] for c in all_candidates})
+            with st.spinner(f"Pass 2: discovering fresh downloadable audio in {', '.join(styles)}…"):
+                second, issues = discover_across_sources(client_id,
+                    max_tracks=sample_count - len(candidates), sources=selected_sources,
+                    tags=styles, exclude_ids={c['id'] for c in all_candidates})
             warnings.extend(issues)
             # A focused category may contain too few eligible tracks. Use
             # remaining styles as exploration instead of repeating candidates.
@@ -260,8 +266,8 @@ if st.button("Find Similar Music", type="primary", use_container_width=True):
             if remaining > 0 and focus:
                 fallback_tags = tuple(t for t in SEARCH_TAGS if t not in focus)
                 if fallback_tags:
-                    additional, issues = find_candidates(client_id, max_tracks=remaining,
-                              tags=fallback_tags,
+                    additional, issues = discover_across_sources(client_id, max_tracks=remaining,
+                              sources=selected_sources, tags=fallback_tags,
                               exclude_ids={c['id'] for c in [*all_candidates, *second]})
                     second.extend(additional)
                     warnings.extend(issues)
@@ -277,6 +283,7 @@ if st.button("Find Similar Music", type="primary", use_container_width=True):
             "candidate_count": len(all_candidates), "skipped": skipped, "warnings": warnings,
             "reference_bpm": reference["bpm"], "focus": focus,
             "adaptive": bool(second_budget), "weights": dict(weights),
+            "catalogues": selected_sources,
         }
         reference_label = reference_upload.name if input_mode == "Upload an audio file" else f"Windows capture for {video_id}"
         try:
@@ -292,7 +299,10 @@ if "last_results" in st.session_state:
     scored = st.session_state["last_results"]
     summary = st.session_state["last_summary"]
     if scored:
-        st.success(f"Acoustically compared {len(scored)} Jamendo recordings from {summary['candidate_count']} sampled candidates. Reference BPM: {summary['reference_bpm']:.1f}.")
+        from collections import Counter
+        source_counts = Counter(track.get("source", "Jamendo") for track in scored)
+        source_summary = ", ".join(f"{name}: {num}" for name, num in source_counts.items())
+        st.success(f"Real audio analysed: {len(scored)} recordings from {summary['candidate_count']} eligible candidates. Sources: {source_summary}. Reference BPM: {summary['reference_bpm']:.1f}.")
         if summary.get("focus"):
             st.caption(f"Second-pass discovery prioritised {', '.join(summary['focus'])} based on the first-pass audio scores; this does not guarantee better matches.")
         for rank, track in enumerate(scored[:10], 1):
@@ -300,14 +310,14 @@ if "last_results" in st.session_state:
                 left, right = st.columns([4, 1])
                 with left:
                     st.write(f"**{rank}. {track['artist']} — {track['title']}**")
-                    st.caption(f"Closest sonic characteristics: {', '.join(track['strengths'])} • estimated BPM: {track['bpm']:.1f} • discovered through {track.get('source_style', 'Jamendo')}")
+                    st.caption(f"**Catalogue:** {track.get('source', 'Jamendo')} • Strongest feature similarities: {', '.join(track['strengths'])} • estimated BPM: {track['bpm']:.1f} • search tag: {track.get('source_style', 'unspecified')}")
                     with st.expander("Why did this track rank here?"):
                         st.caption("Acoustic feature similarity by category. These are heuristic scores, not listening-based accuracy ratings.")
                         for group in GROUPS:
                             value = float(track["components"].get(group, 0))
                             st.progress(min(1.0, max(0.0, value / 100)),
                                         text=f"{group}: {value:.1f}/100 • preference weight {summary['weights'][group]}/5")
-                    st.link_button("Listen on Jamendo", track["listen_url"])
+                    st.link_button("Listen on " + track.get("source", "Jamendo"), track["listen_url"])
                     if track.get("license_url"):
                         st.link_button("Track licence", track["license_url"])
                 with right:
@@ -317,7 +327,7 @@ if "last_results" in st.session_state:
     if summary["skipped"] or summary["warnings"]:
         with st.expander("Unanalysed candidates / API issues"):
             st.write("\n".join((summary["warnings"] + summary["skipped"])[:35]))
-    st.caption("Only the sampled, artist-downloadable Jamendo tracks were scored. Fingerprints are cached locally without saving MP3s. Scores are uncalibrated similarity indices, not probabilities, and cannot claim to rank all Jamendo music.")
+    st.caption("Only recordings from selected sources that were actually downloaded, decoded and acoustically compared receive scores. Unavailable or unlicensed audio is skipped. Fingerprints are cached, raw tracks are discarded. Scores are uncalibrated similarity indices, not probabilities or catalogue-wide rankings.")
 
 with st.sidebar.expander("Recent discoveries (stored on this PC)"):
     past_searches = read_history(ROOT / "user-data" / "search-history.json")
@@ -327,7 +337,17 @@ with st.sidebar.expander("Recent discoveries (stored on this PC)"):
         for item in past_searches[:5]:
             top = (item.get("matches") or [{}])[0]
             st.write(f"**{item.get('reference', 'Reference')}**")
-            st.caption(f"{item.get('at_utc', '')[:10]} • {item.get('analysed', 0)} candidates • top match: {top.get('artist', 'None')} — {top.get('title', '')}")
+            st.caption(f"{item.get('at_utc', '')[:10]} • {item.get('analysed', 0)} candidates examined")
+            if top.get("artist"):
+                st.write(f"Top audio match: **{top['artist']} — {top.get('title', '')}**")
+                st.caption(f"Source: {top.get('source', 'Jamendo')} • similarity: {float(top.get('score', 0)):.1f}/100 (heuristic, not probability)")
+                if top.get("listen_url"):
+                    st.link_button("Listen to top match", top["listen_url"])
+            else:
+                st.caption("No playable, analysed matches in this search")
+            vid = item.get("reference", "").removeprefix("Windows capture for ")
+            if vid != item.get("reference", "") and len(vid) == 11:
+                st.link_button("Open reference song", "https://www.youtube.com/watch?v=" + vid)
         if st.button("Clear local search history", key="clear_history"):
             (ROOT / "user-data" / "search-history.json").unlink(missing_ok=True)
             st.rerun()
