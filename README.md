@@ -1,6 +1,18 @@
-# Vibe Finder 0.4.1 — acoustic music discovery (development build)
+# Vibe Finder 0.5.0 — acoustic music discovery (development build)
 
 Vibe Finder analyses real audio to suggest similar-sounding tracks from a sampled set of eligible Jamendo music. Scores are heuristic acoustic similarity indices, not probabilities or proof of shared musical style.
+
+## What's new in 0.5
+
+- **Adaptive discovery:** the selected track budget is split into a broad Jamendo scan and an optional second pass targeting styles that performed best against the reference in the first *actual audio* scan. A fallback searches other styles if focused results are unavailable; tracks never get counted twice. The search is NOT catalogue-wide or machine-learned recommendation.
+- **Fair sampling:** collection across genres is round-robin instead of always filling from the first tags; up to four Jamendo metadata requests overlap.
+- **Acoustic matching:** added short-lag attack recurrence and low-frequency pulse variation to existing rhythm/bass features. Cached fingerprints use a new version key and are recalculated on demand.
+- **Explainable rankings:** expand a match to see each of the five acoustic group scores and the weights selected for the search. All similarity scores remain heuristics and require real-music validation.
+- **Local search history:** recent reference labels, weights, and ranked match metadata are stored in `user-data/search-history.json`, with a Clear button. Raw audio and Jamendo Client IDs are never written to this history.
+- **Playback diagnostics:** signal peak meter after the three-second device check (not a continuously updating live graph).
+- **Updater reliability:** online version checks include a unique cache-busting query and no-cache headers, plus installed/remote version diagnostics.
+
+When published on GitHub, install using **App updates > Check for online updates > Download and prepare update**, then close and relaunch `run-windows.bat`.
 
 ## Choose one reference song
 
@@ -41,7 +53,11 @@ The offline benchmark uses generated WAV tracks, not Jamendo downloads. Run `pyt
 
 - Jamendo's accessible sample may not include niche tracks or provide good stylistic matches. No candidate is ranked without actual audio analysis, but rankings are not yet calibrated against human similarity judgements.
 - The model does not automatically acquire a YouTube waveform; opt-in live capture is a separate Windows capability.
-- The 0.4.1 development build has passed local unit tests, including mocked Windows output selection/capture tests, and synthetic-audio benchmarks. Actual Windows output capture and Jamendo end-to-end playback are not verifiable in this Linux environment. A **real Jamendo API and download test**, plus Windows WASAPI capture, still require validation on a Windows machine. The development environment cannot reach Jamendo live.
-- This README describes a development build; publication as a GitHub online update is a separate step.
+- The 0.5 development build has passed local unit tests, including mocked Windows output selection/capture tests, and synthetic-audio benchmarks. Actual Windows output capture and Jamendo end-to-end playback are not verifiable in this Linux environment. A **real Jamendo API and download test**, plus Windows WASAPI capture, still require validation on a Windows machine. The development environment cannot reach Jamendo live.
+- This README describes a development build; the GitHub update feed publishes version 0.5.0 after the archive is uploaded.
 
 Run tests with `python -m unittest discover -s tests -v`.
+
+## Updater cache fix in 0.5.0
+
+GitHub Raw can temporarily serve a cached `releases/latest.json` after a new version has been published, causing older Vibe Finder apps to incorrectly report **Up to date**. Version 0.5.0 appends a unique cache-busting query to every manifest fetch and sets no-cache request headers. The updater reports both the installed version and the version supplied by the feed. Version 0.4.1 or earlier may require one manual official update ZIP to acquire this fix; it does not rewrite protected local settings or the launcher.

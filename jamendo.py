@@ -7,6 +7,7 @@ folder and delete them after feature extraction. All results are heuristic.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 from pathlib import Path
@@ -52,23 +53,38 @@ def _api_json(client_id: str, *, tag: str, limit: int, session=requests):
 
 
 def find_candidates(client_id: str, max_tracks: int = 24, *, session=requests,
-                    tags: tuple[str, ...] = SEARCH_TAGS) -> tuple[list[dict], list[str]]:
-    """Sample multiple styles; rank *only later* using acoustic descriptors.
+                    tags: tuple[str, ...] = SEARCH_TAGS,
+                    exclude_ids: set[str] | None = None) -> tuple[list[dict], list[str]]:
+    """Collect a fair cross-style sample of *download-permitted* tracks.
 
-    The returned list is not a search of all Jamendo tracks. All tracks with
-    forbidden downloads are discarded, even if their streaming URL exists.
+    Round-robin selection prevents the first API tags from monopolising the
+    acoustic scan. A second pass can exclude IDs already analysed. This is
+    bounded discovery, not catalogue-wide ranking or a claim of AI matching.
     """
-    if max_tracks < 1:
+    if max_tracks < 1 or not tags:
         return [], []
-    chosen: dict[str, dict] = {}
+    seen = set(exclude_ids or ())
+    by_style: dict[str, list[dict]] = {}
     warnings: list[str] = []
-    per_style = max(3, (max_tracks + max(len(tags), 1) - 1) // max(len(tags), 1) * 2)
-    for tag in tags:
-        try:
-            rows = _api_json(client_id, tag=tag, limit=per_style, session=session)
-        except JamendoError as exc:
-            warnings.append(f"{tag}: {exc}")
-            continue
+    unique_tags = tuple(dict.fromkeys(tags))
+    per_style = min(50, max(4, ((max_tracks + len(unique_tags) - 1) // len(unique_tags)) * 3))
+    # Independent metadata queries can overlap, while results remain ordered
+    # by the user's tag list and concurrent API calls remain tightly bounded.
+    with ThreadPoolExecutor(max_workers=min(4, len(unique_tags))) as pool:
+        requests_by_tag = {
+            tag: pool.submit(_api_json, client_id, tag=tag, limit=per_style, session=session)
+            for tag in unique_tags
+        }
+        responses_by_tag = {}
+        for tag in unique_tags:
+            try:
+                responses_by_tag[tag] = requests_by_tag[tag].result()
+            except JamendoError as exc:
+                warnings.append(f"{tag}: {exc}")
+                responses_by_tag[tag] = []
+    for tag in unique_tags:
+        rows = responses_by_tag[tag]
+        eligible = []
         for item in rows:
             if not item.get("audiodownload_allowed") or not item.get("audiodownload"):
                 continue
@@ -76,20 +92,38 @@ def find_candidates(client_id: str, max_tracks: int = 24, *, session=requests,
             if not _is_trusted_audio_url(url):
                 continue
             identifier = str(item.get("id", ""))
-            if not identifier or identifier in chosen:
+            if not identifier or identifier in seen:
                 continue
             license_url = item.get("license_ccurl") or ""
             if not license_url and isinstance(item.get("license"), dict):
                 license_url = item["license"].get("ccurl", "")
-            chosen[identifier] = {
+            eligible.append({
                 "id": identifier, "artist": str(item.get("artist_name", "Unknown artist")),
                 "title": str(item.get("name", "Untitled")), "audio_url": url,
                 "listen_url": str(item.get("shareurl", "")) or f"https://www.jamendo.com/track/{identifier}",
                 "license_url": str(license_url), "source_style": tag,
-            }
-            if len(chosen) >= max_tracks:
-                return list(chosen.values()), warnings
-    return list(chosen.values()), warnings
+            })
+        by_style[tag] = eligible
+    selected = []
+    cursor = {tag: 0 for tag in unique_tags}
+    while len(selected) < max_tracks:
+        advanced = False
+        for tag in unique_tags:
+            rows = by_style.get(tag, [])
+            while cursor[tag] < len(rows):
+                track = rows[cursor[tag]]
+                cursor[tag] += 1
+                if track["id"] in seen:
+                    continue
+                selected.append(track)
+                seen.add(track["id"])
+                advanced = True
+                break
+            if len(selected) >= max_tracks:
+                break
+        if not advanced:
+            break
+    return selected, warnings
 
 
 def _is_trusted_audio_url(url: str) -> bool:

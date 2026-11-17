@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import tempfile
@@ -188,7 +189,11 @@ def _get_url(url: str, limit: int, expected_host: str | None = None) -> bytes:
         raise UpdateError("Update URLs must use HTTPS")
     if expected_host and parts.hostname.casefold() != expected_host.casefold():
         raise UpdateError("Release archive is not on the trusted update host")
-    request = urllib.request.Request(url, headers={"User-Agent": "VibeFinderUpdater/0.3"})
+    request = urllib.request.Request(url, headers={
+        "User-Agent": "VibeFinderUpdater/0.4.2",
+        "Cache-Control": "no-cache, no-store, max-age=0",
+        "Pragma": "no-cache",
+    })
     with urllib.request.urlopen(request, timeout=15) as response:
         final_parts = urllib.parse.urlsplit(response.geturl())
         if final_parts.scheme != "https" or (expected_host and final_parts.hostname != expected_host):
@@ -203,20 +208,30 @@ def check_online(root: Path) -> dict | None:
     url = remote_update_source(root)
     if url is None:
         return None
-    host = urllib.parse.urlsplit(url).hostname
-    remote = json.loads(_get_url(url, 64 * 1024, host))
+    # GitHub Raw can cache a branch-based latest.json after publication.
+    # A fresh per-request query avoids a stale cached manifest. The configured
+    # canonical URL and the ZIP host checks remain unchanged.
+    parts = urllib.parse.urlsplit(url)
+    fresh_query = urllib.parse.urlencode(
+        urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        + [("vf_refresh", secrets.token_hex(8))]
+    )
+    fresh_url = urllib.parse.urlunsplit(parts._replace(query=fresh_query))
+    host = parts.hostname
+    remote = json.loads(_get_url(fresh_url, 64 * 1024, host))
     if remote.get("app_id") != APP_ID or not isinstance(remote.get("version"), str):
         raise UpdateError("Update feed does not describe Vibe Finder")
     _version(remote["version"])
-    if _version(remote["version"]) <= _version(installed_version(root)):
-        return {"current": True, "version": installed_version(root)}
+    local_version = installed_version(root)
+    if _version(remote["version"]) <= _version(local_version):
+        return {"current": True, "version": local_version, "remote_version": remote["version"]}
     archive_url = remote.get("archive_url")
     sha = remote.get("sha256")
     if not isinstance(archive_url, str) or not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{64}", sha):
         raise UpdateError("Update feed has no valid release URL and checksum")
     if urllib.parse.urlsplit(archive_url).hostname != host:
         raise UpdateError("Update ZIP and manifest must use same trusted host")
-    return {"current": False, "version": remote["version"], "archive_url": archive_url, "sha256": sha, "host": host}
+    return {"current": False, "version": remote["version"], "remote_version": remote["version"], "archive_url": archive_url, "sha256": sha, "host": host}
 
 
 def stage_online(root: Path, release: dict) -> str:

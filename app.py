@@ -12,8 +12,10 @@ import streamlit as st
 from discovery import BENCHMARK_URL, discover_tracks, get_video_title, youtube_id
 from engine import GROUPS, analyse, compare
 from version import APP_VERSION
-from jamendo import JamendoError, find_candidates, valid_client_id, test_connection
+from jamendo import JamendoError, SEARCH_TAGS, find_candidates, valid_client_id, test_connection
 from candidate_pipeline import scan_candidates
+from adaptive_discovery import search_budgets, focus_styles
+from history import read_history, save_search
 from live_audio import CaptureError, capture_output, list_output_devices, test_output_device
 from updater import UpdateError, check_online, stage_online, stage_package
 
@@ -21,7 +23,7 @@ ROOT = Path(__file__).resolve().parent
 
 st.set_page_config(page_title="Vibe Finder • Find the vibe", page_icon="🎧", layout="wide")
 st.title("🎧 Vibe Finder")
-st.caption(f"Prototype {APP_VERSION} • Genuine audio analysis for authorised music. Choose a reference upload or opt-in Windows listening.")
+st.caption(f"Prototype {APP_VERSION} • Actual acoustic comparisons of eligible recordings. Upload a song or opt into Windows output capture.")
 
 with st.sidebar.expander(f"App updates (v{APP_VERSION})", expanded=False):
     st.write("Updates go into this same folder. Your music library and settings stay put.")
@@ -42,7 +44,7 @@ with st.sidebar.expander(f"App updates (v{APP_VERSION})", expanded=False):
             if online is None:
                 st.info("Automatic online releases are not configured yet. They'll be enabled once there's a trusted release website.")
             elif online["current"]:
-                st.success(f"Up to date (v{online['version']}).")
+                st.success(f"Up to date (installed v{online['version']}; feed v{online.get('remote_version', online['version'])}).")
         except Exception as exc:
             st.error(f"Could not check updates: {exc}")
     online = st.session_state.get("online_update")
@@ -136,6 +138,7 @@ else:
                     check = test_output_device(selected_index)
                 if check["audible"]:
                     st.success(f"Sound detected on {check['device']} — peak {check['peak_percent']:.1f}%, RMS {check['rms_dbfs']:.1f} dBFS.")
+                    st.progress(min(1.0, check["peak_percent"] / 100.0), text="Recorded signal peak (3-second sample)")
                 else:
                     st.warning(f"No sound detected on {check['device']}. Play a song, check Windows Volume Mixer, or select another output and test again.")
             except CaptureError as exc:
@@ -160,8 +163,9 @@ with st.expander("Advanced matching preferences"):
     cols = st.columns(5)
     starting = {"Rhythm": 5, "Bass": 5, "Timbre": 4, "Atmosphere": 4, "Energy": 3}
     weights = {name: col.slider(name, 0, 5, starting[name]) for name, col in zip(GROUPS, cols)}
-    sample_count = st.slider("Number of Jamendo candidate tracks to analyse", 4, 30, 16, step=2)
-    st.caption("Speed: up to 4 simultaneous downloads and 2 DSP analysis processes. Results update as tracks finish. Previously analysed tracks reuse local fingerprints.")
+    sample_count = st.slider("Maximum Jamendo candidates to analyse", 4, 40, 16, step=2)
+    adaptive_enabled = st.checkbox("Adaptive two-stage discovery (explore, then search promising styles)", value=True)
+    st.caption("Speed: up to 4 downloads and 2 DSP analysis processes. The adaptive second pass reserves part of your track budget, not extra downloads. Locally cached fingerprints are reused.")
 
 st.subheader("2. Find similar-sounding music")
 if st.button("Find Similar Music", type="primary", use_container_width=True):
@@ -190,35 +194,81 @@ if st.button("Find Similar Music", type="primary", use_container_width=True):
                 st.warning("Play the reference song and press Listen Live before searching. A YouTube link alone cannot be acoustically analysed.")
                 st.stop()
             reference = captured["features"]
-        with st.spinner("Looking for downloadable, authorised Jamendo candidate tracks…"):
-            candidates, warnings = find_candidates(client_id, max_tracks=sample_count)
+        first_budget, second_budget = search_budgets(sample_count, adaptive_enabled)
+        with st.spinner("Pass 1: sampling permitted recordings across Jamendo styles…"):
+            candidates, warnings = find_candidates(client_id, max_tracks=first_budget)
         if not candidates:
             st.warning("No eligible Jamendo candidates returned. Check the client ID or try again later.")
             if warnings:
                 st.write(warnings)
             st.stop()
+
         scored = []
         skipped = []
-        bar = st.progress(0, text="Starting parallel audio comparisons")
+        all_candidates = list(candidates)
+        focus = ()
+        bar = st.progress(0, text="Analysing broad discovery sample")
         live_status = st.empty()
         cache_path = ROOT / "user-data" / "jamendo-fingerprints.json"
-        for event in scan_candidates(candidates, reference, weights, cache_path,
-                                     download_workers=4, analysis_workers=2):
-            if event["match"]:
-                scored.append(event["match"])
-            if event["error"]:
-                skipped.append(event["error"])
-            bar.progress(event["completed"] / event["total"],
-                         text=f"Processed {event['completed']} / {event['total']} songs • {len(scored)} matches")
-            if scored:
-                leaders = sorted(scored, key=lambda item: item["score"], reverse=True)[:3]
-                live_status.write("Best matches so far (provisional): " + " • ".join(
-                    f"{song['artist']} — {song['title']} ({song['score']:.1f})" for song in leaders))
+
+        def run_batch(batch: list[dict], stage_label: str) -> None:
+            for event in scan_candidates(batch, reference, weights, cache_path,
+                                         download_workers=4, analysis_workers=2):
+                if event["match"]:
+                    scored.append(event["match"])
+                if event["error"]:
+                    skipped.append(event["error"])
+                # The total is a fixed user-selected budget, not just the current batch.
+                completed = len(scored) + len(skipped)
+                bar.progress(min(1.0, completed / sample_count),
+                             text=f"{stage_label}: {completed}/{sample_count} sampled • {len(scored)} analysed")
+                if scored:
+                    leaders = sorted(scored, key=lambda item: item["score"], reverse=True)[:3]
+                    live_status.write("Best acoustic matches so far (provisional): " + " • ".join(
+                        f"{song['artist']} — {song['title']} ({song['score']:.1f})" for song in leaders))
+
+        run_batch(candidates, "Pass 1 • broad scan")
+        if second_budget:
+            focus = focus_styles(scored, SEARCH_TAGS)
+            # If the first pass yielded no usable audio, broaden again instead
+            # of assuming any genre is relevant to the reference.
+            styles = focus or SEARCH_TAGS
+            with st.spinner(f"Pass 2: discovering fresh tracks in {', '.join(styles)}…"):
+                second, issues = find_candidates(client_id, max_tracks=sample_count - len(candidates),
+                                                 tags=styles,
+                                                 exclude_ids={c['id'] for c in all_candidates})
+            warnings.extend(issues)
+            # A focused category may contain too few eligible tracks. Use
+            # remaining styles as exploration instead of repeating candidates.
+            remaining = sample_count - len(candidates) - len(second)
+            if remaining > 0 and focus:
+                fallback_tags = tuple(t for t in SEARCH_TAGS if t not in focus)
+                if fallback_tags:
+                    additional, issues = find_candidates(client_id, max_tracks=remaining,
+                              tags=fallback_tags,
+                              exclude_ids={c['id'] for c in [*all_candidates, *second]})
+                    second.extend(additional)
+                    warnings.extend(issues)
+            if second:
+                run_batch(second, "Pass 2 • focused scan")
+                all_candidates.extend(second)
+
         bar.empty()
         live_status.empty()
         scored.sort(key=lambda item: item["score"], reverse=True)
         st.session_state["last_results"] = scored
-        st.session_state["last_summary"] = {"candidate_count": len(candidates), "skipped": skipped, "warnings": warnings, "reference_bpm": reference["bpm"]}
+        st.session_state["last_summary"] = {
+            "candidate_count": len(all_candidates), "skipped": skipped, "warnings": warnings,
+            "reference_bpm": reference["bpm"], "focus": focus,
+            "adaptive": bool(second_budget), "weights": dict(weights),
+        }
+        reference_label = reference_upload.name if input_mode == "Upload an audio file" else f"Windows capture for {video_id}"
+        try:
+            save_search(ROOT / "user-data" / "search-history.json",
+                        reference_label=reference_label, matches=scored,
+                        examined=len(all_candidates), weights=weights, adaptive=bool(second_budget))
+        except OSError:
+            st.caption("Search completed, but its local history couldn't be saved.")
     except Exception as exc:
         st.error(f"Discovery could not finish: {exc}")
 
@@ -227,12 +277,20 @@ if "last_results" in st.session_state:
     summary = st.session_state["last_summary"]
     if scored:
         st.success(f"Acoustically compared {len(scored)} Jamendo recordings from {summary['candidate_count']} sampled candidates. Reference BPM: {summary['reference_bpm']:.1f}.")
+        if summary.get("focus"):
+            st.caption(f"Second-pass discovery prioritised {', '.join(summary['focus'])} based on the first-pass audio scores; this does not guarantee better matches.")
         for rank, track in enumerate(scored[:10], 1):
             with st.container(border=True):
                 left, right = st.columns([4, 1])
                 with left:
                     st.write(f"**{rank}. {track['artist']} — {track['title']}**")
-                    st.caption(f"Closest sonic characteristics: {', '.join(track['strengths'])} • estimated BPM: {track['bpm']:.1f}")
+                    st.caption(f"Closest sonic characteristics: {', '.join(track['strengths'])} • estimated BPM: {track['bpm']:.1f} • discovered through {track.get('source_style', 'Jamendo')}")
+                    with st.expander("Why did this track rank here?"):
+                        st.caption("Acoustic feature similarity by category. These are heuristic scores, not listening-based accuracy ratings.")
+                        for group in GROUPS:
+                            value = float(track["components"].get(group, 0))
+                            st.progress(min(1.0, max(0.0, value / 100)),
+                                        text=f"{group}: {value:.1f}/100 • preference weight {summary['weights'][group]}/5")
                     st.link_button("Listen on Jamendo", track["listen_url"])
                     if track.get("license_url"):
                         st.link_button("Track licence", track["license_url"])
@@ -244,6 +302,19 @@ if "last_results" in st.session_state:
         with st.expander("Unanalysed candidates / API issues"):
             st.write("\n".join((summary["warnings"] + summary["skipped"])[:35]))
     st.caption("Only the sampled, artist-downloadable Jamendo tracks were scored. Fingerprints are cached locally without saving MP3s. Scores are uncalibrated similarity indices, not probabilities, and cannot claim to rank all Jamendo music.")
+
+with st.sidebar.expander("Recent discoveries (stored on this PC)"):
+    past_searches = read_history(ROOT / "user-data" / "search-history.json")
+    if not past_searches:
+        st.caption("No recent searches. Only music metadata and scores are saved, never audio.")
+    else:
+        for item in past_searches[:5]:
+            top = (item.get("matches") or [{}])[0]
+            st.write(f"**{item.get('reference', 'Reference')}**")
+            st.caption(f"{item.get('at_utc', '')[:10]} • {item.get('analysed', 0)} candidates • top match: {top.get('artist', 'None')} — {top.get('title', '')}")
+        if st.button("Clear local search history", key="clear_history"):
+            (ROOT / "user-data" / "search-history.json").unlink(missing_ok=True)
+            st.rerun()
 
 with st.expander("Fallback: YouTube metadata-only discovery"):
     st.caption("This feature does NOT compare audio; it's here for when a reference recording cannot be analysed.")

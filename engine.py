@@ -56,6 +56,14 @@ def analyse(path: str | Path, max_seconds: int = MAX_SECONDS) -> dict[str, Any]:
     modulation_bins = np.interp(np.linspace(0.5, 12, 24), mod_freq, modulation)
     modulation_bins /= (np.linalg.norm(modulation_bins) + 1e-8)
 
+    # Short-lag autocorrelation captures the recurrence of attacks, including
+    # groove subdivisions that a single BPM estimate can overlook.
+    lag_series = np.fft.irfft(np.abs(np.fft.rfft(env, n=2 * len(env))) ** 2)
+    lag_times = np.arange(len(lag_series)) * HOP / sr
+    attack_recurrence = np.interp(np.linspace(.12, 1.4, 12), lag_times,
+                                  lag_series / (lag_series[0] + 1e-8))
+    attack_recurrence = np.clip(attack_recurrence, -1.0, 1.0)
+
     # Normalised coarse frequency bands: approximates sub-bass / bass texture.
     edges = [20, 55, 110, 220, 450, 900, 2200, 6000, 11025]
     band_energy = []
@@ -64,6 +72,12 @@ def analyse(path: str | Path, max_seconds: int = MAX_SECONDS) -> dict[str, Any]:
         band_energy.append(float(np.mean(np.sum(power[mask], axis=0))) if mask.any() else 0.0)
     band_energy = np.asarray(band_energy)
     bands = np.sqrt(band_energy / (np.sum(band_energy) + 1e-8))
+    # Low-frequency pulse variation distinguishes a steady bass drone from
+    # an otherwise similar track with pronounced rhythmic bass attacks.
+    low_mask = (frequencies >= 20) & (frequencies < 220)
+    low_energy = np.sqrt(np.sum(power[low_mask, :], axis=0) + 1e-8)
+    low_var = float(np.std(low_energy) / (np.mean(low_energy) + 1e-8))
+    bass_detail = np.r_[bands, np.clip(low_var / 3.0, 0.0, 1.0)]
 
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=HOP)
     contrast = librosa.feature.spectral_contrast(S=np.sqrt(power) + 1e-8, sr=sr)
@@ -75,7 +89,8 @@ def analyse(path: str | Path, max_seconds: int = MAX_SECONDS) -> dict[str, Any]:
 
     # Normalize and squash descriptors into reasonably comparable ranges.
     # These remain hand-engineered heuristics that will be calibrated later.
-    rhythms = np.r_[modulation_bins, np.log1p(len(onsets) / duration) / 3.0]
+    rhythms = np.r_[modulation_bins, attack_recurrence,
+                     np.log1p(len(onsets) / duration) / 3.0]
     timbre = np.r_[np.mean(mfcc, axis=1) / 100.0, np.std(mfcc, axis=1) / 100.0,
                    np.mean(centroid) / sr, np.mean(flatness), np.mean(zcr)]
     atmosphere = np.r_[np.mean(contrast, axis=1) / 50.0,
@@ -87,7 +102,7 @@ def analyse(path: str | Path, max_seconds: int = MAX_SECONDS) -> dict[str, Any]:
         "duration": round(duration, 2),
         "bpm": round(raw_tempo, 1),
         "Rhythm": _sanitize(rhythms),
-        "Bass": _sanitize(bands),
+        "Bass": _sanitize(bass_detail),
         "Timbre": _sanitize(timbre),
         "Atmosphere": _sanitize(atmosphere),
         "Energy": _sanitize(energy),

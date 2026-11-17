@@ -22,7 +22,7 @@ from engine import analyse, compare
 from jamendo import temporary_audio
 
 CACHE_SCHEMA = 1
-FINGERPRINT_VERSION = "dsp50-v1"
+FINGERPRINT_VERSION = "dsp50-v2"
 MAX_CACHE_ENTRIES = 1200
 
 

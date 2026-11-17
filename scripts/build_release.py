@@ -3,7 +3,7 @@
 Usage: python scripts/build_release.py --owner YOUR-GITHUB-NAME --repo vibe-finder
 Then commit the resulting releases/ files to a PUBLIC repository's main branch.
 
-For v0.3 already installed, bump APP_VERSION to at least v0.4.0 before creating
+For a prior installation, bump APP_VERSION before creating
 an update: a release with the same version is intentionally not installable.
 """
 from __future__ import annotations
@@ -20,7 +20,8 @@ from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_FILES = (
-    "app.py", "engine.py", "discovery.py", "jamendo.py", "candidate_pipeline.py", "live_audio.py", "updater.py", "version.py",
+    "app.py", "engine.py", "discovery.py", "jamendo.py", "candidate_pipeline.py",
+    "adaptive_discovery.py", "history.py", "live_audio.py", "updater.py", "version.py",
     "requirements.txt", "README.md",
 )
 
