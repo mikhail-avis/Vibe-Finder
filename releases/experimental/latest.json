@@ -1,7 +1,7 @@
 {
   "app_id": "vibe-finder",
   "channel": "experimental",
-  "version": "0.7.2",
-  "archive_url": "https://raw.githubusercontent.com/mikhail-avis/Vibe-Finder/main/releases/experimental/v0.7.2.zip",
-  "sha256": "8a930472065322b7ff6822fc1d04975669a56f923d544d2b638d770387c1779e"
+  "version": "0.7.3",
+  "archive_url": "https://raw.githubusercontent.com/mikhail-avis/Vibe-Finder/main/releases/experimental/v0.7.3.zip",
+  "sha256": "e30e42a0e3fb2113cf627c244c01844e168d828f347ecbd2784b1db499da49f8"
 }
